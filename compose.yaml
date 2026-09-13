@@ -1,0 +1,26 @@
+services:
+  l4d2:
+    build: .
+    image: l4d2-linux-server:latest
+    container_name: l4d2-server
+    restart: unless-stopped
+    # host networking avoids UDP NAT overhead and allows local LAN discovery
+    network_mode: host
+    userns_mode: keep-id
+    user: "1000:1000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=${PORT:-27015}
+      - STEAM_PORT=${STEAM_PORT:-26901}
+      - SERVER_NAME=${SERVER_NAME:-Left 4 Dead 2 Dedicated Server}
+      - RCON_PASSWORD=${RCON_PASSWORD:-ChangeThisRconPassword123}
+      - SERVER_PASSWORD=${SERVER_PASSWORD:-}
+      - DEFAULT_MAP=${DEFAULT_MAP:-c1m1_hotel}
+      - MAX_PLAYERS=${MAX_PLAYERS:-8}
+      - AUTO_UPDATE=${AUTO_UPDATE:-false}
+      - VALIDATE_ON_BOOT=${VALIDATE_ON_BOOT:-false}
+      - INSTALL_SOURCEMOD=${INSTALL_SOURCEMOD:-false}
+    volumes:
+      - ./data:/data

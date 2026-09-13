@@ -1,0 +1,33 @@
+// Server Name & Passwords
+hostname "${SERVER_NAME}"
+rcon_password "${RCON_PASSWORD}"
+sv_password "${SERVER_PASSWORD}"
+
+// Server Region & LAN Settings
+// 255 = worldwide, 0 = US East, 1 = US West, 2 = South America, 3 = Europe, 4 = Asia, 5 = Australia
+sv_region 255
+sv_lan 0
+
+// Matchmaking & Visibility
+sv_allow_lobby_connect_only 0
+sv_steamgroup "${STEAM_GROUP_ID}"
+sv_steamgroup_exclusive "${STEAM_GROUP_EXCLUSIVE}"
+
+// Network & Tickrate Performance
+sv_minrate 30000
+sv_maxrate 100000
+sv_minupdaterate 30
+sv_maxupdaterate 100
+sv_mincmdrate 30
+sv_maxcmdrate 100
+net_splitpacket_maxrate 50000
+
+// Gameplay / Voice
+sv_voiceenable 1
+sv_alltalk 0
+
+// Logging
+log on
+sv_logecho 1
+sv_logfile 1
+sv_log_onefile 0

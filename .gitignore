@@ -1,0 +1,9 @@
+# Server game data and binaries
+data/
+
+# Environment / local secrets
+.env
+
+# Logs and runtime artifacts
+*.log
+.DepotDownloader/

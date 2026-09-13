@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 LABEL maintainer="Homelab Admin"
 LABEL description="Dedicated Left 4 Dead 2 Server using DepotDownloader to bypass SteamCMD anonymous login bugs"

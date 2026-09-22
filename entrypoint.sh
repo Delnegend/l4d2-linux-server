@@ -19,6 +19,8 @@ RCON_PASSWORD="${RCON_PASSWORD:-ChangeMeRcon123}"
 SERVER_PASSWORD="${SERVER_PASSWORD:-}"
 STEAM_GROUP_ID="${STEAM_GROUP_ID:-}"
 STEAM_GROUP_EXCLUSIVE="${STEAM_GROUP_EXCLUSIVE:-0}"
+SV_CONSISTENCY="${SV_CONSISTENCY:-0}"
+SV_PURE="${SV_PURE:-0}"
 AUTO_UPDATE="${AUTO_UPDATE:-false}"
 VALIDATE_ON_BOOT="${VALIDATE_ON_BOOT:-false}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
@@ -52,16 +54,14 @@ chmod +x "${DATA_DIR}/srcds_run" "${DATA_DIR}/srcds_linux" 2>/dev/null || true
 mkdir -p "${HOME}/.steam/sdk32"
 ln -sf "${DATA_DIR}/bin/steamclient.so" "${HOME}/.steam/sdk32/steamclient.so"
 
-# Initialize server.cfg if not present
+# Template server.cfg on every startup to ensure environment variables are the source of truth
 CFG_DIR="${DATA_DIR}/left4dead2/cfg"
 mkdir -p "${CFG_DIR}"
 
-if [ ! -f "${CFG_DIR}/server.cfg" ]; then
-    echo "[Bootstrap] Creating default server.cfg from template..."
-    export SERVER_NAME RCON_PASSWORD SERVER_PASSWORD STEAM_GROUP_ID STEAM_GROUP_EXCLUSIVE
-    # Substitute environment variables into template
-    perl -pe 's/\$\{(\w+)\}/defined($ENV{$1}) ? $ENV{$1} : $&/ge' /defaults/server.cfg.template > "${CFG_DIR}/server.cfg"
-fi
+echo "[Bootstrap] Templating server.cfg from /defaults/server.cfg.template..."
+export SERVER_NAME RCON_PASSWORD SERVER_PASSWORD STEAM_GROUP_ID STEAM_GROUP_EXCLUSIVE SV_CONSISTENCY SV_PURE
+# Substitute environment variables into template
+perl -pe 's/\$\{(\w+)\}/defined($ENV{$1}) ? $ENV{$1} : $&/ge' /defaults/server.cfg.template > "${CFG_DIR}/server.cfg"
 
 # Optional SourceMod / MetaMod installation
 if [ "${INSTALL_SOURCEMOD:-false}" = "true" ] && [ ! -d "${DATA_DIR}/left4dead2/addons/sourcemod" ]; then

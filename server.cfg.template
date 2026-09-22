@@ -22,6 +22,10 @@ sv_mincmdrate 30
 sv_maxcmdrate 100
 net_splitpacket_maxrate 50000
 
+// Consistency & Pure Checks
+sv_consistency ${SV_CONSISTENCY}
+sv_pure ${SV_PURE}
+
 // Gameplay / Voice
 sv_voiceenable 1
 sv_alltalk 0
@@ -31,3 +35,6 @@ log on
 sv_logecho 1
 sv_logfile 1
 sv_log_onefile 0
+
+// Execute optional custom configs if present
+exec server_custom.cfg

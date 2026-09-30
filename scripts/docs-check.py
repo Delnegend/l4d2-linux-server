@@ -114,7 +114,7 @@ for name, default in re.findall(r"^\| `([A-Z_]+)` \| `([^`]*)` \|", arch, re.M):
 # 5. Tag policy: semver + latest only, no per-target tags anywhere
 # ---------------------------------------------------------------------------
 workflow = read(ROOT / ".github/workflows/publish.yaml")
-pushed = set(re.findall(r"\$\{\{ env\.IMAGE \}\}:([\w.${}-]+)", workflow))
+pushed = set(re.findall(r"^\s*\$\{\{ env\.IMAGE \}\}:(.+?)\s*$", workflow, re.M))
 pushed = {tag for tag in pushed if "IMAGE" not in tag}
 
 if "latest" not in pushed:
@@ -130,6 +130,22 @@ for path in DOCS:
 # ---------------------------------------------------------------------------
 # 6. The compression claim in the docs matches the workflow
 # ---------------------------------------------------------------------------
+if "compression=zstd" not in workflow:
+    fail("publish.yaml: registry compression is not zstd")
+level = re.search(r"compression-level=(\d+)", workflow)
+if not level:
+    fail("publish.yaml: no compression level set")
+
+# Exactly two tags, and one of them must be the exact version. A rolling
+# `1.0`/`1` tag is as much a policy change as a per-target one.
+version_refs = [t for t in pushed if "version.outputs" in t]
+if len(pushed) != 2:
+    fail(f"publish.yaml: pushes {len(pushed)} tags {sorted(pushed)}, expected exactly 2")
+if len(version_refs) != 1:
+    fail("publish.yaml: exactly one tag must be the exact version")
+if "latest" not in pushed:
+    fail("publish.yaml: does not push a 'latest' tag")
+
 if "compression=zstd" not in workflow:
     fail("publish.yaml: registry compression is not zstd")
 level = re.search(r"compression-level=(\d+)", workflow)

@@ -49,11 +49,10 @@ discoverable.
 | Tag | Meaning |
 |---|---|
 | `1.0.3` | An exact release. **Pin this for a real deployment.** |
-| `1.0`, `1` | Rolling: latest patch of that minor / major. |
 | `latest` | The newest release. Convenient, and only as fresh as your last pull. |
 
-There are no per-target tags: `:1.0.3` is the same image for everyone, and a
-deployment should always name an exact version.
+Those are the only two tags. `:1.0.3` is the same image for everyone, there is
+no per-target tag, and a deployment should always name an exact version.
 
 ## Configuration
 

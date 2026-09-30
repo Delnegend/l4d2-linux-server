@@ -47,16 +47,12 @@ jobs:
           case "$version" in
             ''|*[!0-9.]*) echo "::error::refusing to tag with version '$version'"; exit 1 ;;
           esac
-          major="${version%%.*}"
-          minor="${version#*.}"
-          minor="${minor%%.*}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "major_minor=$major.$minor" >> "$GITHUB_OUTPUT"
-          echo "major=$major" >> "$GITHUB_OUTPUT"
 
-      # One published image, tagged by semver only: the exact version, the
-      # rolling major.minor and major, and `latest`. There is no per-target tag,
-      # so `:1.0.3` always means the same thing.
+      # One published image, with exactly two tags: the exact version and
+      # `latest`. No rolling major.minor or major tags, and no per-target tag,
+      # so `:1.0.3` always means the same thing and there is nothing ambiguous
+      # to accidentally deploy.
       #
       # `base` is a build stage, not a published image: it exists so the layers
       # above can be proven to sit on an unmodified install, and so a rebuild
@@ -79,8 +75,6 @@ jobs:
           outputs: type=image,compression=zstd,compression-level=4
           tags: |
             ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
-            ${{ env.IMAGE }}:${{ steps.version.outputs.major_minor }}
-            ${{ env.IMAGE }}:${{ steps.version.outputs.major }}
             ${{ env.IMAGE }}:latest
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}

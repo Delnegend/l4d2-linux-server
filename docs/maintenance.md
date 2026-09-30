@@ -50,14 +50,16 @@ manual `workflow_dispatch` with a version) builds and pushes.
 | Tag | Points at |
 |---|---|
 | `<version>` | the `server` image, e.g. `:1.0.3` |
-| `<major>.<minor>`, `<major>` | the newest release in that range |
 | `latest` | the newest release |
 
-One published image, no per-target tags. `base` is a build stage and is never
+One published image, exactly two tags: the exact version and `latest`. No
+rolling `1.0` or `1` tags, and no per-target tags - so there is nothing
+ambiguous for a deployment to latch onto by accident. `base` is a build stage and is never
 pushed — see [architecture.md](architecture.md#why-base-is-a-stage-and-not-an-image).
 
 > **Consumer note:** pin an exact version. A deployment on `:latest` changes
-> underneath you on the next pull, and `:1.0` moves when a patch is released.
+> underneath you on the next pull, and there is no rolling `1.0` tag to fall
+> back on, which is deliberate.
 
 A publish needs roughly 10 GB of registry blobs, almost all of it the install
 layer, compressed with zstd level 4 (see

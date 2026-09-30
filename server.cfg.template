@@ -14,15 +14,20 @@ sv_steamgroup "${STEAM_GROUP_ID}"
 sv_steamgroup_exclusive "${STEAM_GROUP_EXCLUSIVE}"
 
 // Network & Tickrate Performance
+//
+// sv_minupdaterate / sv_maxupdaterate are deliberately absent: L4D2 has no such
+// cvars and the engine logs "Unknown command" for every one of them. The
+// tickrate cvars that do exist (fps_max, nb_update_frequency, net_splitrate)
+// belong in server_custom.cfg, and only matter once a tickrate is unlocked.
 sv_minrate 30000
 sv_maxrate 100000
-sv_minupdaterate 30
-sv_maxupdaterate 100
 sv_mincmdrate 30
 sv_maxcmdrate 100
 net_splitpacket_maxrate 50000
 
 // Consistency & Pure Checks
+// sv_consistency must stay 0 once a co-op campaign seats more than four
+// survivors - the consistency check rejects the extra model files.
 sv_consistency ${SV_CONSISTENCY}
 sv_pure ${SV_PURE}
 
@@ -36,5 +41,8 @@ sv_logecho 1
 sv_logfile 1
 sv_log_onefile 0
 
-// Execute optional custom configs if present
-exec server_custom.cfg
+// Persistent overrides from cfg/server_custom.cfg are appended to this file
+// by the entrypoint, below everything above. They are not `exec`'d from here:
+// the engine resolves `exec` against the install root, which lives in the
+// image rather than on the volume, so the file on the volume is unreachable
+// that way.

@@ -2,18 +2,21 @@
 set -e
 
 echo "=================================================="
-echo " Left 4 Dead 2 Linux Dedicated Server (Bootstrap) "
+echo " Left 4 Dead 2 Linux Dedicated Server            "
 echo "=================================================="
 
 DATA_DIR="/data"
-APP_ID=222860
-DEPOT_DOWNLOADER="/opt/depotdownloader/DepotDownloader"
+# The install is baked into the image; DATA_DIR is the volume. See "Game files"
+# below for how the two are joined.
+GAME_DIR="${GAME_DIR:-/opt/l4d2}"
+
+# The player count is a property of this image, not a runtime knob.
+MAX_PLAYERS=8
 
 # Default environment values
 PORT="${PORT:-27015}"
 STEAM_PORT="${STEAM_PORT:-26901}"
 DEFAULT_MAP="${DEFAULT_MAP:-c1m1_hotel}"
-MAX_PLAYERS="${MAX_PLAYERS:-8}"
 SERVER_NAME="${SERVER_NAME:-Left 4 Dead 2 Dedicated Server}"
 RCON_PASSWORD="${RCON_PASSWORD:-ChangeMeRcon123}"
 SERVER_PASSWORD="${SERVER_PASSWORD:-}"
@@ -21,9 +24,6 @@ STEAM_GROUP_ID="${STEAM_GROUP_ID:-}"
 STEAM_GROUP_EXCLUSIVE="${STEAM_GROUP_EXCLUSIVE:-0}"
 SV_CONSISTENCY="${SV_CONSISTENCY:-0}"
 SV_PURE="${SV_PURE:-0}"
-AUTO_UPDATE="${AUTO_UPDATE:-false}"
-VALIDATE_ON_BOOT="${VALIDATE_ON_BOOT:-false}"
-INSTALL_SOURCEMOD="${INSTALL_SOURCEMOD:-false}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
 # ---------------------------------------------------------------------------
@@ -69,6 +69,33 @@ reject_flag() {
                 "Remove '${flag}' from EXTRA_ARGS and restart the container."
             ;;
     esac
+}
+
+# Mirror one directory level.
+#
+# Every entry of the image directory appears in the data directory, as a
+# symlink - unless the data directory already holds a real entry of that name,
+# which always wins. That rule is what makes this non-destructive: an old
+# volume carrying a full install keeps every one of its files, and only gains
+# links for whatever the image adds.
+mirror_tree() {
+    local src="$1" dst="$2" entry name
+
+    mkdir -p "${dst}"
+    shopt -s nullglob dotglob
+    for entry in "${src}"/*; do
+        name="$(basename "${entry}")"
+        if [ -L "${dst}/${name}" ] && [ ! -e "${dst}/${name}" ]; then
+            # The image dropped this file; keeping the link would leave a
+            # dangling symlink behind.
+            rm -f "${dst}/${name}"
+        fi
+        if [ -e "${dst}/${name}" ] || [ -L "${dst}/${name}" ]; then
+            continue
+        fi
+        ln -s "${entry}" "${dst}/${name}"
+    done
+    shopt -u nullglob dotglob
 }
 
 # Post-boot visibility self-check.
@@ -218,30 +245,83 @@ esac
 # ---------------------------------------------------------------------------
 # Game files
 # ---------------------------------------------------------------------------
+#
+# The ~20 GB install is baked into the image at GAME_DIR. DATA_DIR is the
+# volume, and it stays the server's working directory - the layout the engine,
+# the config paths and every admin tool already expect. The join is a farm of
+# symlinks: read-only game content is linked in from the image, while the
+# directories and files the server or an admin writes to are real.
+#
+# Directories under left4dead2/ the server and the admin write to. Each becomes
+# a real directory whose own entries are links, so a workshop map or a custom
+# campaign dropped in shows up alongside the shipped ones.
+WRITABLE_DIRS="cfg addons maps scripts"
 
-NEEDS_DOWNLOAD=false
-if [ ! -f "${DATA_DIR}/srcds_run" ] || [ ! -f "${DATA_DIR}/srcds_linux" ]; then
-    log "No existing server installation found in ${DATA_DIR}."
-    NEEDS_DOWNLOAD=true
-elif [ "${AUTO_UPDATE}" = "true" ]; then
-    log "AUTO_UPDATE is set to true. Checking for updates..."
-    NEEDS_DOWNLOAD=true
+# Plain files the server rewrites or an admin edits by hand. Never links: a
+# write through a link would land in the container filesystem and vanish on
+# the next restart.
+WRITABLE_GAME_FILES="motd.txt mapcycle.txt missioncycle.txt maplist.txt"
+WRITABLE_DATA_FILES="console.log"
+
+if [ ! -d "${GAME_DIR}/left4dead2" ]; then
+    fail \
+        "No server install at ${GAME_DIR}." \
+        "" \
+        "This image bakes the game files in, so the install is missing from the" \
+        "image itself. If you are running the 'qol' image, check that the image" \
+        "was not rebuilt with --no-cache after the install layer was pruned."
 fi
 
-if [ "${NEEDS_DOWNLOAD}" = "true" ]; then
-    log "Running DepotDownloader (anonymous download for App ID ${APP_ID})..."
-    DD_ARGS=(-app "${APP_ID}" -os linux -dir "${DATA_DIR}")
+log "Linking the image install (${GAME_DIR}) into ${DATA_DIR}..."
+mirror_tree "${GAME_DIR}" "${DATA_DIR}"
 
-    if [ "${VALIDATE_ON_BOOT}" = "true" ]; then
-        DD_ARGS+=(-validate)
+GAME_DATA_DIR="${DATA_DIR}/left4dead2"
+
+# left4dead2/ is linked by the mirroring above, and it has to be a real
+# directory before its contents can be linked into it - otherwise the links
+# would be written into the image instead of the volume. An old volume that
+# already holds a real install is left alone.
+if [ -L "${GAME_DATA_DIR}" ]; then
+    rm -f "${GAME_DATA_DIR}"
+fi
+mkdir -p "${GAME_DATA_DIR}"
+mirror_tree "${GAME_DIR}/left4dead2" "${GAME_DATA_DIR}"
+
+for name in ${WRITABLE_DIRS}; do
+    [ -d "${GAME_DIR}/left4dead2/${name}" ] || continue
+
+    # The mirroring above linked this directory; replace that link with a real
+    # directory, which is what lets files be added to it.
+    if [ -L "${GAME_DATA_DIR}/${name}" ]; then
+        rm -f "${GAME_DATA_DIR}/${name}"
     fi
+    mkdir -p "${GAME_DATA_DIR}/${name}"
+    mirror_tree "${GAME_DIR}/left4dead2/${name}" "${GAME_DATA_DIR}/${name}"
+done
 
-    "${DEPOT_DOWNLOADER}" "${DD_ARGS[@]}"
-    log "DepotDownloader finished successfully."
+for name in ${WRITABLE_GAME_FILES}; do
+    if [ -L "${GAME_DATA_DIR}/${name}" ]; then
+        rm -f "${GAME_DATA_DIR}/${name}"
+        cp "${GAME_DIR}/left4dead2/${name}" "${GAME_DATA_DIR}/${name}"
+    fi
+done
+
+for name in ${WRITABLE_DATA_FILES}; do
+    if [ -L "${DATA_DIR}/${name}" ]; then
+        rm -f "${DATA_DIR}/${name}"
+    fi
+    if [ ! -e "${DATA_DIR}/${name}" ]; then
+        : > "${DATA_DIR}/${name}"
+    fi
+done
+
+if [ ! -x "${DATA_DIR}/srcds_run" ]; then
+    fail \
+        "${DATA_DIR}/srcds_run is missing or not executable after linking." \
+        "" \
+        "Check that ${DATA_DIR} is a writable volume and that nothing in it" \
+        "shadows the image install."
 fi
-
-# Ensure executable permissions on binaries
-chmod +x "${DATA_DIR}/srcds_run" "${DATA_DIR}/srcds_linux" 2>/dev/null || true
 
 # Ensure steamclient.so is linked to ~/.steam/sdk32 for Valve Steam API
 mkdir -p "${HOME}/.steam/sdk32"
@@ -254,19 +334,22 @@ ln -sf "${DATA_DIR}/bin/steamclient.so" "${HOME}/.steam/sdk32/steamclient.so"
 # server.cfg is regenerated from /defaults/server.cfg.template on every start so
 # that the environment variables are the single source of truth. Hand-edits to
 # server.cfg therefore do NOT survive a restart. Persistent cvars belong in
-# server_custom.cfg, which server.cfg exec's and which is never overwritten.
+# server_custom.cfg, whose contents are appended to the rendered server.cfg
+# and which is never overwritten.
 
-CFG_DIR="${DATA_DIR}/left4dead2/cfg"
+CFG_DIR="${GAME_DATA_DIR}/cfg"
 mkdir -p "${CFG_DIR}"
 
 CUSTOM_CFG="${CFG_DIR}/server_custom.cfg"
 if [ ! -f "${CUSTOM_CFG}" ]; then
     log "Creating ${CUSTOM_CFG} for persistent cvar overrides."
     cat > "${CUSTOM_CFG}" <<'EOF'
-// Persistent cvar overrides, exec'd at the end of server.cfg.
+// Persistent cvar overrides, appended to the end of server.cfg.
 //
 // server.cfg is regenerated from /defaults/server.cfg.template on EVERY
 // container start, so anything edited there is lost on the next restart.
+// Whatever is in THIS file is appended to the rendered server.cfg verbatim on
+// every start, so it must not contain `exec`.
 // Put cvars that must survive a restart in THIS file instead - it is never
 // overwritten.
 //
@@ -282,6 +365,26 @@ export SERVER_NAME RCON_PASSWORD SERVER_PASSWORD STEAM_GROUP_ID STEAM_GROUP_EXCL
 RENDERED_CFG="$(mktemp)"
 # Substitute environment variables into template
 perl -pe 's/\$\{(\w+)\}/defined($ENV{$1}) ? $ENV{$1} : $&/ge' /defaults/server.cfg.template > "${RENDERED_CFG}"
+
+# Append the overrides to the rendered file rather than leaving them to an
+# `exec` in the template: the engine resolves `exec` against the install root,
+# which is inside the image, so it can never reach this volume.
+#
+# Two sources, in order, so the volume always has the last word:
+#   1. /defaults/server_custom.cfg - what the image itself needs (the coop8
+#      target ships l4dtoolz's cvars this way)
+#   2. ${CUSTOM_CFG}               - what the operator added
+for overrides in /defaults/server_custom.cfg "${CUSTOM_CFG}"; do
+    [ -s "${overrides}" ] || continue
+    log "Appending persistent overrides from ${overrides}..."
+    {
+        echo ""
+        echo "// ---------------------------------------------------------------------"
+        echo "// ${overrides}, verbatim"
+        echo "// ---------------------------------------------------------------------"
+        cat "${overrides}"
+    } >> "${RENDERED_CFG}"
+done
 
 # Warn before discarding hand-edits, so the loss is never silent.
 file_hash() {
@@ -302,49 +405,13 @@ if [ -n "${SERVER_PASSWORD}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Optional SourceMod / MetaMod installation
-# ---------------------------------------------------------------------------
-
-if [ "${INSTALL_SOURCEMOD}" = "true" ] && [ ! -d "${DATA_DIR}/left4dead2/addons/sourcemod" ]; then
-    log "INSTALL_SOURCEMOD requested. Installing MetaMod:Source and SourceMod..."
-    mkdir -p /tmp/sm
-    cd /tmp/sm
-
-    # Download latest MetaMod:Source 1.11
-    MM_URL=$(curl -sSL "https://mms.alliedmods.net/mmsdrop/1.11/mmsource-latest-linux")
-    curl -sSL "https://mms.alliedmods.net/mmsdrop/1.11/${MM_URL}" -o mmsource.tar.gz
-    tar -xzf mmsource.tar.gz -C "${DATA_DIR}/left4dead2"
-
-    # Download latest SourceMod 1.11
-    SM_URL=$(curl -sSL "https://sm.alliedmods.net/smdrop/1.11/sourcemod-latest-linux")
-    curl -sSL "https://sm.alliedmods.net/smdrop/1.11/${SM_URL}" -o sourcemod.tar.gz
-    tar -xzf sourcemod.tar.gz -C "${DATA_DIR}/left4dead2"
-
-    rm -rf /tmp/sm
-    log "MetaMod:Source and SourceMod installed."
-fi
-
-# SourceMod / MetaMod optimizations for L4D2:
-# 1. Disable nextmap.smx (incompatible with L4D2 campaigns)
-if [ -f "${DATA_DIR}/left4dead2/addons/sourcemod/plugins/nextmap.smx" ]; then
-    log "Disabling nextmap.smx (incompatible with L4D2)..."
-    mkdir -p "${DATA_DIR}/left4dead2/addons/sourcemod/plugins/disabled"
-    mv -f "${DATA_DIR}/left4dead2/addons/sourcemod/plugins/nextmap.smx" \
-          "${DATA_DIR}/left4dead2/addons/sourcemod/plugins/disabled/" 2>/dev/null || true
-fi
-
-# 2. Remove 64-bit metamod binaries to silence ELFCLASS64 dlopen warnings in 32-bit srcds
-if [ -d "${DATA_DIR}/left4dead2/addons/metamod/bin/linux64" ]; then
-    rm -rf "${DATA_DIR}/left4dead2/addons/metamod/bin/linux64"
-fi
-
-# ---------------------------------------------------------------------------
 # Launch
 # ---------------------------------------------------------------------------
 
 echo "=================================================="
 echo " Starting SRCDS on Port ${PORT}, Map ${DEFAULT_MAP} "
 echo "=================================================="
+log "Players: ${MAX_PLAYERS} (fixed by this image)"
 log "Steam group: ${STEAM_GROUP_ID:-<none>} (exclusive: ${STEAM_GROUP_EXCLUSIVE})"
 log "Password protected: $([ -n "${SERVER_PASSWORD}" ] && echo yes || echo no)"
 log "Extra arguments: ${EXTRA_ARGS:-<none>}"

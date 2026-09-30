@@ -7,8 +7,7 @@ no `AUTO_UPDATE`, and no `VALIDATE_ON_BOOT`: the install is fetched while
 the image is built, and the running container never talks to Valve.
 
 ```bash
-podman build --target qol   -t l4d2:1.0.4-qol   .
-podman build --target coop8 -t l4d2:1.0.4-coop8 .
+just build
 ```
 
 The build cache keeps the download layer, so a rebuild only fetches what Valve
@@ -24,19 +23,20 @@ that stage re-runs, it picks up whatever AlliedModders published. The cost is
 that images are only reproducible against a warm cache.
 
 ```bash
-podman build --target qol --build-arg SOURCEMOD_BRANCH=1.11 -t l4d2:1.0.4-qol .
+SOURCEMOD_BRANCH=1.13 just build    # 1.13 is the dev channel
 ```
 
-Use `1.11` only if a specific 1.12 build misbehaves — it is the last stable
-branch, but the 5+/8-player plugins need 1.12
-([eight-players.md](eight-players.md)).
+1.12 is sourcemod.net's **stable** channel, 1.13 its dev channel, and 1.11 is a
+legacy branch kept for people who need it. The 5+/8-player plugins are compiled
+against 1.12, so a 1.11 build is the one combination that is both unsupported and
+less functional ([eight-players.md](eight-players.md)).
 
 ## Updating l4dtoolz
 
 ```bash
-podman build --target coop8 \
+podman build \
   --build-arg L4DTOOLZ_VERSION=2.5.1 --build-arg L4DTOOLZ_BUILD=2155 \
-  -t l4d2:1.0.4-coop8 .
+  -t localhost/l4d2:dev .
 ```
 
 Both arguments must match a real release asset; the filename the build expects
@@ -47,21 +47,28 @@ is `l4dtoolz-<version>-<build>.zip`.
 Publishing is driven by `.github/workflows/publish.yaml`: a GitHub release (or a
 manual `workflow_dispatch` with a version) builds and pushes.
 
-| Target | Tags |
+| Tag | Points at |
 |---|---|
-| `qol` | `<version>-qol`, `qol`, `latest` |
-| `coop8` | `<version>-coop8`, `coop8` |
+| `<version>` | the `server` image, e.g. `:1.0.3` |
+| `<major>.<minor>`, `<major>` | the newest release in that range |
+| `latest` | the newest release |
 
-`base` is a build stage and is not published — see
-[architecture.md](architecture.md#the-build-graph).
+One published image, no per-target tags. `base` is a build stage and is never
+pushed — see [architecture.md](architecture.md#why-base-is-a-stage-and-not-an-image).
 
-> **Consumer note:** there is no unsuffixed `<version>` tag. A deployment that
-> referenced `:1.0.1` must move to `:1.0.x-qol`, or it will fail to pull.
-> `latest` currently points at `qol`; `coop8` is deliberately not aliased until
-> it has been verified with real clients.
+> **Consumer note:** pin an exact version. A deployment on `:latest` changes
+> underneath you on the next pull, and `:1.0` moves when a patch is released.
 
-A publish needs about 10 GB of registry blobs per release, almost all of it the shared
-install layer, and roughly 5–8 minutes of build time from cold.
+A publish needs roughly 10 GB of registry blobs, almost all of it the install
+layer, compressed with zstd level 4 (see
+[architecture.md](architecture.md#compression)), and takes about 5–8 minutes
+from a cold cache.
+
+To push a locally built image with the same compression:
+
+```bash
+L4D2_VERSION=1.0.3 just push
+```
 
 ## Cache behaviour
 
@@ -78,7 +85,7 @@ the fetch stage — most often a changed `APP_ID`, `DEPOT_DOWNLOADER_VERSION` or
 
 After pulling a new game build, before pointing players at it:
 
-1. `podman run` the new image with a scratch volume and check the log for
+1. `just smoke` boots the new image on a scratch volume and waits for
    `Self-check OK: server answers A2S queries`.
 2. Confirm the boot log has no new `Unknown command` lines beyond the known
    engine-internal one (`mat_bloom_scalefactor_scalar`) — see the table in
@@ -86,10 +93,10 @@ After pulling a new game build, before pointing players at it:
 3. Join with one client and confirm the map loads and the server answers A2S.
    The self-check only proves the query layer; it does not prove the campaign
    scripts still run.
-4. For `coop8`, confirm the l4dtoolz cvars took effect: `sv_maxplayers` and
-   `precache_all_survivors` should not appear as `Unknown command`. Neither
-   should they — the engine stays silent about unknown cvars in config files, so
-   pass them as launch arguments once if you want a real check.
+4. Confirm the l4dtoolz cvars took effect: `sv_maxplayers` and
+   `precache_all_survivors` must not appear as `Unknown command`. The engine is
+   silent about unknown cvars in config files, so pass them as launch arguments
+   once if you want a real check.
 
 ## Why the download happens at build time
 

@@ -14,13 +14,13 @@ Measured on build 10097: `+maxplayers 8` → `maxplayers set to 18`;
 `server.cfg` → `maxplayers set to 18`. l4dtoolz's documentation states the same
 thing from the other side: *"The engine's default value is 18."*
 
-So the honest summary of the `qol` image is that it locks **8 slots**, and the
-`coop8` target is what addresses the 4-survivor cap.
+So the honest summary is that `+maxplayers 8` locks **8 slots**, and l4dtoolz is
+what addresses the 4-survivor cap. Both ship in the published image.
 
-## What `coop8` does
+## What the image does about it
 
-`coop8` is `FROM qol` plus [l4dtoolz](https://github.com/lakwsh/l4dtoolz) 2.5.1
-and three cvars, shipped as the image-level override layer
+[Source](https://github.com/lakwsh/l4dtoolz) is l4dtoolz 2.5.1, baked into the
+image with three cvars in the image-level override layer
 (`/defaults/server_custom.cfg`):
 
 ```cvar
@@ -44,13 +44,26 @@ Notes on the three:
 - `precache_all_survivors` exists because more than four different survivor
   models in play at once will otherwise crash the server.
 
-Nothing about the source of these is fixed: the volume's
-`server_custom.cfg` is appended *after* the image's, so any of them can be
-overridden without a rebuild.
+The volume's `server_custom.cfg` is appended *after* the image's, so any of
+them can be changed without a rebuild:
 
 ```bash
 echo 'sv_maxplayers 12' >> data/left4dead2/cfg/server_custom.cfg
 ```
+
+### Putting it back the way it was
+
+To go back to a stock 4-survivor campaign — no lobby changes at all — override
+the one cvar that does the work:
+
+```bash
+echo 'sv_force_unreserved 0' >> data/left4dead2/cfg/server_custom.cfg
+```
+
+The last value wins, so the appended line replaces the image's `1` with `0`.
+Dropping `l4dtoolz.so` and `l4dtoolz.vdf` from
+`data/left4dead2/addons/` also works, and the volume entry wins over the image's
+link.
 
 ## Getting players in is a client problem
 
@@ -82,9 +95,9 @@ broken upstream. One thing is actually in the way, and it is a single artifact:
 
 Everything else about those two is already satisfied — they load far enough for
 SourceMod to name the missing dependency, which only happens on the **1.12**
-branch. On 1.11 `l4dmultislots` dies earlier and less usefully, with
-`unsupported feature set; code is too new`. That is why the images build
-MetaMod:Source and SourceMod from 1.12.
+branch that the images build. On the legacy 1.11 branch `l4dmultislots` dies
+earlier and less usefully, with `unsupported feature set; code is too new`.
+1.12 is sourcemod.net's stable channel, so this costs nothing in stability.
 
 ### Why DHooks is not automated
 

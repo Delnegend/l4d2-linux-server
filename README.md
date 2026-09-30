@@ -5,6 +5,8 @@ time** with [DepotDownloader](https://github.com/SteamRE/DepotDownloader) and
 bakes it into the image. A cold start is instant: there is no first-boot
 download, and the container never needs a Steam login.
 
+Prebuilt images are published to `ghcr.io/delnegend/l4d2-linux-server`.
+
 ---
 
 ## The problem this solves
@@ -27,51 +29,31 @@ it.
 ## Quick start
 
 ```bash
+git clone https://github.com/Delnegend/l4d2-linux-server.git
+cd l4d2-linux-server
+
 cp .env.example .env      # set at least RCON_PASSWORD
-podman compose up -d --build
+
+podman compose pull
+podman compose up -d
 podman compose logs -f
 ```
 
-That builds and runs the `qol` target. Expect `Self-check OK: server answers
-A2S queries` in the log within a minute — that line is the server telling you it
-is discoverable.
+That is the whole install: `compose.yaml` references the published image, so
+nothing is built on your machine. Expect `Self-check OK: server answers A2S
+queries` in the log within a minute — that line is the server telling you it is
+discoverable.
 
-Pulling a prebuilt image instead? Use the `qol` tag, e.g.
-`ghcr.io/delnegend/l4d2-linux-server:1.0.3-qol`. There is no unsuffixed
-`<version>` tag; the target is always explicit.
+### Image tags
 
-## Image targets
+| Tag | Meaning |
+|---|---|
+| `1.0.3` | An exact release. **Pin this for a real deployment.** |
+| `1.0`, `1` | Rolling: latest patch of that minor / major. |
+| `latest` | The newest release. Convenient, and only as fresh as your last pull. |
 
-| Target | Tags | Contents |
-|---|---|---|
-| `base` | *build stage only* | The 9.8 GB install exactly as DepotDownloader pulled it, plus the 32-bit runtime libraries. No entrypoint, no configuration, no mods, no customisation. |
-| `qol` | `<version>-qol`, `qol`, `latest` | `FROM base`, plus MetaMod:Source + SourceMod (1.12), the entrypoint and the `server.cfg` template. **This is the one to run.** |
-| `coop8` | `<version>-coop8`, `coop8` | `FROM qol`, plus l4dtoolz and the cvars that lift the 4-survivor cap on co-op campaigns. |
-
-```bash
-podman build --target qol   -t l4d2:1.0.3-qol   .
-podman build --target coop8 -t l4d2:1.0.3-coop8 .
-```
-
-## What you get
-
-- **Build-time install** — the full server including the DLC campaigns, fetched
-  in parallel at `podman build` and baked in.
-- **A ~1 MB volume** — the read-only game content stays in the image and is
-  linked into `/data` at start-up. Nothing is ever copied.
-- **No host dependencies** — the 32-bit runtime libraries are included; it runs
-  on Fedora CoreOS, Ubuntu, Debian, Arch and friends without multilib.
-- **Template-driven config** — `server.cfg` is regenerated from a template on
-  every start, so environment variables are the single source of truth, and
-  `server_custom.cfg` holds everything they don't cover.
-- **Misconfiguration guards** — the entrypoint refuses to start rather than run
-  a server that is invisible in the browser, and warns before discarding
-  hand-edits to `server.cfg`.
-- **Visibility self-check** — after boot it probes the running server over A2S
-  and says so loudly, because an undiscoverable server otherwise looks perfectly
-  healthy in the logs.
-- **SourceMod and MetaMod baked in** — nothing is installed at boot.
-- **Non-root** — runs as an unprivileged `steam` user, UID 1000.
+There are no per-target tags: `:1.0.3` is the same image for everyone, and a
+deployment should always name an exact version.
 
 ## Configuration
 
@@ -95,15 +77,66 @@ The player count is not an environment variable: the image always launches with
 co-op campaign to four survivors is something else entirely — see
 [docs/eight-players.md](docs/eight-players.md).
 
+## What you get
+
+- **Build-time install** — the full server including the DLC campaigns, fetched
+  in parallel at build time and baked in.
+- **A ~1 MB volume** — the read-only game content stays in the image and is
+  linked into `/data` at start-up. Nothing is ever copied.
+- **No host dependencies** — the 32-bit runtime libraries are included; it runs
+  on Fedora CoreOS, Ubuntu, Debian, Arch and friends without multilib.
+- **SourceMod, MetaMod and l4dtoolz baked in** — nothing is installed at boot.
+- **Template-driven config** — `server.cfg` is regenerated from a template on
+  every start, so environment variables are the single source of truth, and
+  `server_custom.cfg` holds everything they don't cover.
+- **Misconfiguration guards** — the entrypoint refuses to start rather than run
+  a server that is invisible in the browser, and warns before discarding
+  hand-edits to `server.cfg`.
+- **Visibility self-check** — after boot it probes the running server over A2S
+  and says so loudly, because an undiscoverable server otherwise looks perfectly
+  healthy in the logs.
+- **Non-root** — runs as an unprivileged `steam` user, UID 1000.
+
 ## Documentation
 
 | Document | Read it when |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | You want to know how the image is layered, how `/data` is joined to it, or what a build argument does. |
 | [docs/configuration.md](docs/configuration.md) | You are setting variables, editing configs, or adding maps and campaigns. |
-| [docs/eight-players.md](docs/eight-players.md) | You want more than four survivors in a co-op campaign. |
+| [docs/eight-players.md](docs/eight-players.md) | You want more than four survivors in a co-op campaign, or you are wondering what `maxplayers` does. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | The server is not appearing in the browser, or you are reading a confusing boot log. |
 | [docs/maintenance.md](docs/maintenance.md) | You are updating the game, the mods, or publishing a release. |
+
+---
+
+## Building from source (advanced)
+
+You only need this if you are changing the image itself. A normal install is
+the prebuilt image above.
+
+```bash
+just            # list the available recipes
+just build      # build the image locally as localhost/l4d2:dev
+just up         # build, then run it with compose
+just smoke      # boot it on a scratch volume and wait for the A2S self-check
+just check      # validate the docs against the code
+```
+
+The build is a plain `podman build` with no `--target` needed, because
+`server` is the last stage:
+
+```bash
+podman build -t localhost/l4d2:dev .
+```
+
+`compose.yaml` points at the published image, so `just up` sets `L4D2_IMAGE` to
+the local tag. To build the `base` stage alone — the vanilla install with no
+mods and no entrypoint — use `just build-base`; it is for measuring the install,
+not for deploying.
+
+Requires [just](https://github.com/casey/just) and podman. See
+[docs/architecture.md](docs/architecture.md) for the build arguments and
+[docs/maintenance.md](docs/maintenance.md) for releasing.
 
 ## License
 

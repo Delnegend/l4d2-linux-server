@@ -43,9 +43,10 @@ download anything.
 this order, and the last one wins:
 
 ```text
-server.cfg.template          baked into the image (only qol and coop8)
+server.cfg.template          baked into the image
         +
-/defaults/server_custom.cfg  image-level cvars (only coop8)
+/defaults/server_custom.cfg  image-level cvars (l4dtoolz's, see
+                            eight-players.md)
         +
 /data/left4dead2/cfg/server_custom.cfg   yours, on the volume
         =

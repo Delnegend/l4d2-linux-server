@@ -9,30 +9,38 @@ costs. For configuration see [configuration.md](configuration.md); for the
 ```mermaid
 graph TD
     fetch["fetch<br/>DepotDownloader<br/>never published"] --> base
-    base["base<br/>9.8 GB vanilla install<br/>+ 32-bit runtime libs"] --> qol
-    qol["qol<br/>+ MetaMod:Source + SourceMod 1.12<br/>+ entrypoint + config template"] --> coop8
-    coop8["coop8<br/>+ l4dtoolz<br/>+ its cvars"]
+    base["base<br/>9.8 GB vanilla install<br/>+ 32-bit runtime libs<br/>build stage only"] --> server
+    server["server<br/>+ MetaMod:Source 1.12 + SourceMod 1.12<br/>+ l4dtoolz + entrypoint<br/>THE PUBLISHED IMAGE"]
 ```
 
-| Stage | Image | What it adds |
+| Stage | Published? | What it adds |
 |---|---|---|
-| `fetch` | not a target | DepotDownloader plus the download. Anonymous login, linux depot set. Exists so the downloader never enters a published image. |
-| `base` | build stage only | The 32-bit runtime libraries and the install, byte for byte as DepotDownloader wrote it. No entrypoint, no configuration, no mods. |
-| `qol` | `<v>-qol`, `qol`, `latest` | MetaMod:Source + SourceMod, the entrypoint, `server.cfg.template`. |
-| `coop8` | `<v>-coop8`, `coop8` | l4dtoolz and the cvars that lift the 4-survivor campaign cap. |
+| `fetch` | no target | DepotDownloader plus the download. Anonymous login, linux depot set. Exists so the downloader never enters a published image. |
+| `base` | no, build stage only | The 32-bit runtime libraries and the install, byte for byte as DepotDownloader wrote it. No entrypoint, no configuration, no mods. |
+| `server` | **yes** | `base` plus MetaMod:Source + SourceMod (1.12), l4dtoolz, the entrypoint, `server.cfg.template` and the image-level cvars. |
 
-`base` is a build stage, not a published image. It exists so the layers above it
-can be proven to sit on an unmodified install, and because pushing it would add
-10 GB of registry blobs per release that nothing deploys. Its layers still ship —
-they are the parents of `qol`.
+`server` is the last stage, so `podman build .` produces it with no `--target`.
+
+### Why `base` is a stage and not an image
+
+Two reasons, both practical:
+
+- **Provenance.** Everything in the published image can be attributed to a layer
+  that touches nothing of Valve's content. `base` is the line between "what
+  Valve shipped" and "what we added".
+- **Cache.** It is the only reason a rebuild after an edit to `entrypoint.sh` or
+  `server.cfg.template` costs seconds instead of re-downloading 10 GB. Because
+  the two layers are separate, the expensive one stays put.
+
+It is not published, so nothing deploys it and it costs no extra registry blobs:
+its layers ship anyway, as the parents of `server`.
 
 ### Layer sizes (measured)
 
 | Image | Size | Adds |
 |---|---|---|
 | `base` | 10.0 GB | 9.82 GB install + 130 MB 32-bit runtime libraries + 81 MB Debian |
-| `qol` | 10.3 GB | +~214 MB MetaMod:Source + SourceMod, +17 kB entrypoint and template |
-| `coop8` | 10.3 GB | +1.6 MB `unzip`, +114 kB l4dtoolz, +4 kB cvars |
+| `server` | 10.3 GB | +214 MB and 14 MB MetaMod:Source + SourceMod, +114 kB l4dtoolz, +40 kB config and entrypoint |
 
 Two ownership details in that table are deliberate, and both were measured the
 hard way:
@@ -42,15 +50,31 @@ hard way:
   every one of the ~90 000 files, which the layer store writes as a **second
   10 GB layer** — it made the image 19.9 GB rather than 10.0 GB. The `steam`
   user is therefore created *before* the install lands.
-- The `qol` stage chowns only what the archives touched, plus
+- The `server` stage chowns only what the archives touched, plus
   `left4dead2/cfg` **by name**: the SourceMod tarball carries its own `cfg/`
   entry, and extracting it as root hands that directory back to root. Everything
   under `/opt/l4d2` ends up steam-owned, which is what lets the server run
   unprivileged.
 
-`linux64/` is removed from the MetaMod modules in the same step: the engine is a
-32-bit build, and the 64-bit module only produces dlopen noise
+`linux64/` is removed from the MetaMod modules: the engine is a 32-bit build, and
+the 64-bit module only produces dlopen noise
 (`Unable to load plugin "addons/metamod/bin/linux64/server"`, which is expected).
+
+## Compression
+
+The published image is pushed with **zstd level 4**
+(`outputs: type=image,compression=zstd,compression-level=4`), which is the
+setting that matters: it is the registry blobs that consumers download. The
+`just push` recipe passes the same two flags to `podman push`.
+
+This only affects the push. Layers in podman's local overlay store keep the
+container's own default format, so `podman images` reports a local size that is
+not the same thing as the transferred size.
+
+Anything that pulls the image needs a runtime that understands zstd layers —
+containerd 1.7+, Docker 20.10+, podman 3+. If that ever stops being true, the
+fallback is `compression=gzip` in the workflow and
+`L4D2_COMPRESSION=gzip just push`.
 
 ## The download
 
@@ -62,7 +86,8 @@ compressed) and `222863` (content), are pulled with `-max-downloads`.
 fetched concurrently. The tool's own default is 8.
 
 ```bash
-podman build --target qol --build-arg MAX_DOWNLOADS=32 -t l4d2:1.0.3-qol .
+just build                                   # or: podman build -t l4d2:dev .
+MAX_DOWNLOADS=32 just build
 ```
 
 The tool drops a `.DepotDownloader/` bookkeeping directory *inside the install*,
@@ -74,15 +99,16 @@ not into the working directory, so the fetch stage removes it explicitly.
 |---|---|---|
 | `MAX_DOWNLOADS` | `16` | Concurrent depot chunks. Higher saturates a faster uplink. |
 | `SOURCEMOD_BRANCH` | `1.12` | AlliedModders release branch for **both** MetaMod:Source and SourceMod. |
-| `L4DTOOLZ_VERSION` / `L4DTOOLZ_BUILD` | `2.5.1` / `2155` | Which l4dtoolz release `coop8` bakes. |
+| `L4DTOOLZ_VERSION` / `L4DTOOLZ_BUILD` | `2.5.1` / `2155` | Which l4dtoolz release is baked in. |
 | `SERVER_VERSION` | `dev` | Stamped as `org.opencontainers.image.version`. |
 | `DEBIAN_IMAGE` | `debian:trixie-slim` | Base distribution. |
 
-`SOURCEMOD_BRANCH=1.12` resolves to whatever the newest 1.12 build is at build
-time, so images are reproducible only against a warm cache. 1.11 is the last
-stable branch; 1.12 is what the 5+/8-player plugins are compiled against.
+`SOURCEMOD_BRANCH=1.12` is sourcemod.net's **stable** channel — its dev channel
+is 1.13, and the 1.11 line is kept as a legacy branch. It is also what the
+5+/8-player plugins are compiled against; see
+[eight-players.md](eight-players.md).
 
-## Image and volume
+## The image and the volume
 
 The install lives at `/opt/l4d2` **in the image**. `/data` is the volume and
 stays the server's working directory — the layout the engine, the config paths
@@ -102,7 +128,7 @@ of symlinks, so nothing is ever copied.
 ```
 
 Everything only read is a symlink into the image. Measured: **~1 MB on the
-volume** against ~10 GB in the image.
+volume** against a 10 GB image.
 
 ### Rules the farm follows
 
@@ -112,9 +138,10 @@ volume** against ~10 GB in the image.
   links for whatever the image adds.
 - **Dangling links are pruned.** If a newer image dropped a file, the link is
   removed instead of being left pointing at nothing.
-- **The farm is idempotent and runs on every start.** Dirs that need to accept
-  new files are created as real directories *before* their contents are linked;
-  skipping that step writes the links into the image instead of the volume.
+- **The farm is idempotent and runs on every start.** Directories that need to
+  accept new files are created as real directories *before* their contents are
+  linked; skipping that step writes the links into the image instead of the
+  volume.
 - **Writes never go through a link.** The writable set is explicit, because a
   write through a symlink lands in the container filesystem and is lost on the
   next restart: directories `left4dead2/{cfg,addons,maps,scripts}` plus the

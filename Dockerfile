@@ -1,19 +1,18 @@
 # syntax=docker/dockerfile:1.7
 #
-# Targets, in the order they layer:
+# Targets:
 #
-#   fetch  - one-shot DepotDownloader stage, never published
-#   base   - vanilla dedicated server, downloaded at BUILD time and baked in.
-#            No entrypoint, no config, no mods, no runtime download: the game
-#            files are exactly what DepotDownloader pulled from Valve's depots.
-#            A build stage only - it is not pushed.
-#   qol    - FROM base, adds MetaMod:Source + SourceMod, the entrypoint, the
-#            config template and a server locked to 8 player slots.
-#   coop8  - FROM qol, adds l4dtoolz and the cvars that lift L4D2's 4-survivor
-#            cap on co-op campaigns.
+#   fetch   one-shot DepotDownloader stage, never published
+#   base    vanilla dedicated server, downloaded at BUILD time and baked in, plus
+#           the 32-bit runtime libraries. Never published: it exists so the
+#           image below is provably layered on an unmodified install, and so
+#           that rebuilding after a change to the entrypoint or the config
+#           template hits the build cache instead of re-downloading 10 GB.
+#   server  the published image: base + MetaMod:Source + SourceMod + l4dtoolz,
+#           the entrypoint, the config template, and the image-level cvars.
+#           This is the last stage, so a bare `podman build .` produces it.
 #
-#   podman build --target qol   -t l4d2:1.0.3-qol   .
-#   podman build --target coop8 -t l4d2:1.0.3-coop8 .
+#   just build          # or: podman build -t l4d2:dev .
 #
 # The ~10 GB game payload is downloaded once, in the `fetch` stage, so the
 # downloader never ends up inside a published image.
@@ -100,25 +99,26 @@ WORKDIR /data
 EXPOSE 27015/tcp 27015/udp 26901/udp
 
 # ===========================================================================
-# qol - base + SourceMod/MetaMod + entrypoint, locked to 8 players
+# server - the published image
 # ===========================================================================
-FROM base AS qol
+FROM base AS server
 
 ARG SERVER_VERSION
 
-LABEL description="Left 4 Dead 2 Dedicated Server with SourceMod/MetaMod and templated configuration, locked to 8 players"
+LABEL description="Left 4 Dead 2 Dedicated Server with SourceMod/MetaMod, l4dtoolz and templated configuration, 8 player slots"
 LABEL org.opencontainers.image.version="${SERVER_VERSION}"
 
 # AlliedModders release branch for BOTH MetaMod:Source and SourceMod. 1.12 is
-# the current branch; 1.11 was the last stable one. 1.12 is what the 5+/8-player
-# plugin ecosystem is compiled against - on 1.11 the likes of l4dmultislots fail
-# to load with "unsupported feature set; code is too new".
+# sourcemod.net's *stable* channel (its dev channel is 1.13, and the 1.11 line
+# is kept as a legacy branch), and it is what the 5+/8-player plugin ecosystem
+# is compiled against: on 1.11, l4dmultislots fails to load with
+# "unsupported feature set; code is too new".
 ARG SOURCEMOD_BRANCH=1.12
 
 USER root
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl tar && \
+    apt-get install -y --no-install-recommends curl tar unzip && \
     rm -rf /var/lib/apt/lists/*
 
 # MetaMod:Source + SourceMod, baked into the image copy of the game tree.
@@ -147,40 +147,16 @@ RUN set -eux; \
     chown -R steam:steam /opt/l4d2/left4dead2/addons; \
     chown steam:steam /opt/l4d2/left4dead2/cfg
 
-COPY --chown=steam:steam entrypoint.sh /entrypoint.sh
-COPY --chown=steam:steam server.cfg.template /defaults/server.cfg.template
-RUN chmod +x /entrypoint.sh
-
-USER steam
-WORKDIR /data
-
-ENTRYPOINT ["/entrypoint.sh"]
-
-# ===========================================================================
-# coop8 - qol + l4dtoolz, so a co-op campaign can seat more than 4 survivors
-# ===========================================================================
+# l4dtoolz lifts L4D2's 4-survivor cap on co-op campaigns, which has nothing to
+# do with `+maxplayers`: the engine hard-codes 18 client slots and overwrites
+# that cvar regardless, while the campaign cap of 4 comes from the Steam lobby
+# reservation. Its cvars live in the image-level override below.
 #
-# `+maxplayers` is not what limits a co-op campaign: the engine's own client
-# limit is 18 (and it overrides that cvar regardless of what is passed), while
-# the *campaign* cap of 4 comes from the Steam lobby reservation the server
-# registers. l4dtoolz exposes the cvars that lift the lobby cap and raise the
-# player limit; the values live in the image-level overrides below.
-FROM qol AS coop8
-
+# l4dtoolz.vdf points at "addons/l4dtoolz", so both files belong directly in
+# addons/ - the vdf is what makes the engine load the extension.
 ARG L4DTOOLZ_VERSION=2.5.1
 ARG L4DTOOLZ_BUILD=2155
 
-LABEL description="Left 4 Dead 2 Dedicated Server with SourceMod/MetaMod and l4dtoolz, lifting the 4-player co-op campaign cap"
-LABEL org.opencontainers.image.version="${SERVER_VERSION}"
-
-USER root
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends unzip && \
-    rm -rf /var/lib/apt/lists/*
-
-# l4dtoolz.vdf points at "addons/l4dtoolz", so both files belong directly in
-# addons/ - the vdf is what makes the engine load the extension.
 RUN set -eux; \
     curl -sSL "https://github.com/lakwsh/l4dtoolz/releases/download/${L4DTOOLZ_VERSION}/l4dtoolz-${L4DTOOLZ_VERSION}-${L4DTOOLZ_BUILD}.zip" -o /tmp/l4dtoolz.zip; \
     unzip -q /tmp/l4dtoolz.zip -d /tmp/l4dtoolz; \
@@ -192,5 +168,11 @@ RUN set -eux; \
 
 COPY --chown=steam:steam server_custom.cfg /defaults/server_custom.cfg
 
+COPY --chown=steam:steam entrypoint.sh /entrypoint.sh
+COPY --chown=steam:steam server.cfg.template /defaults/server.cfg.template
+RUN chmod +x /entrypoint.sh
+
 USER steam
 WORKDIR /data
+
+ENTRYPOINT ["/entrypoint.sh"]

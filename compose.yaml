@@ -1,9 +1,10 @@
+# Runs the published image. There is deliberately no `build:` section: users
+# pull a released image, and development happens through the justfile
+# (`just build` / `just up`), which tags the local image the same way so compose
+# picks it up.
 services:
   l4d2:
-    build:
-      context: .
-      target: qol
-    image: l4d2-linux-server:qol
+    image: ${L4D2_IMAGE:-ghcr.io/delnegend/l4d2-linux-server:latest}
     container_name: l4d2-server
     restart: unless-stopped
     # host networking avoids UDP NAT overhead and allows local LAN discovery
@@ -26,6 +27,6 @@ services:
       - SV_PURE=${SV_PURE:-0}
       - EXTRA_ARGS=${EXTRA_ARGS:-}
     volumes:
-      # Only the writable state lives here. The ~20 GB game install is baked
-      # into the image at /opt/l4d2 and linked in at start-up.
+      # Only the writable state lives here. The game install is baked into the
+      # image at /opt/l4d2 and linked in at start-up.
       - ./data:/data

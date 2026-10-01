@@ -29,6 +29,12 @@ engine := env_var_or_default("CONTAINER_ENGINE", "podman")
 userns := if engine == "docker" { "" } else { "--userns=keep-id" }
 own_volume := if engine == "docker" { "sudo chown -R 1000:1000 \"$scratch\"" } else { "true" }
 
+# The volume belongs to uid 1000 after that chown, so on docker the invoking
+# user cannot delete it either - and nothing may read it from the host for the
+# same reason. Everything below therefore asks the *container* about the volume
+# rather than looking at it, which is also engine-agnostic.
+drop_volume := if engine == "docker" { "sudo rm -rf \"$scratch\" >/dev/null 2>&1 || true" } else { "rm -rf \"$scratch\" >/dev/null 2>&1 || true" }
+
 # The image carries no game files, so the ~10 GB install lands on the volume at
 # run time. The smoke volume therefore cannot be a tmpfs - it needs real disk -
 # and it lives under L4D2_SMOKE_DIR (the working tree by default) so where that
@@ -106,7 +112,7 @@ smoke: build
     mkdir -p "{{smoke_dir}}"
     scratch="$(mktemp -d "{{smoke_dir}}/vol-XXXXXX")"
     name="l4d2-smoke-$$"
-    trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
+    trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true; {{drop_volume}}' EXIT
 
     avail_mb="$(df -Pm "$(dirname "$scratch")" | awk 'NR==2 {print $4}')"
     if [ "${avail_mb}" -lt $(( {{install_gb}} * 1000 )) ]; then
@@ -124,14 +130,19 @@ smoke: build
         {{local_tag}} >/dev/null
 
     # The stamp is the install's own statement that it is finished, and the same
-    # one the entrypoint reads to decide whether to skip the download. Testing
-    # the file on the volume rather than a log line is both cheaper and the more
-    # honest check: it is exactly the condition the next start depends on.
+    # one the entrypoint reads to decide whether to skip the download - so it is
+    # exactly the condition the next start depends on.
+    #
+    # Ask the container, never the host. After own_volume the volume belongs to
+    # uid 1000, and the calling user cannot traverse a 0700 mktemp directory:
+    # a host-side test fails with EACCES, silently, and the loop then waits out
+    # the whole timeout on a server that is already up and answering A2S.
     echo "waiting for the install on the volume (up to $(( {{install_timeout}} / 60 )) min)..."
     deadline=$((SECONDS + {{install_timeout}}))
     ready=0
     while [ "${SECONDS}" -lt "${deadline}" ]; do
-        if [ -f "${scratch}/left4dead2/.l4d2-manifest" ] && [ -x "${scratch}/srcds_run" ]; then
+        if {{engine}} exec "$name" test -x /data/srcds_run \
+           && {{engine}} exec "$name" test -f /data/left4dead2/.l4d2-manifest; then
             ready=1
             break
         fi
@@ -147,7 +158,7 @@ smoke: build
         echo "smoke test FAILED: no install within $(( {{install_timeout}} / 60 )) min" >&2
         exit 1
     fi
-    echo "install: $(cat "${scratch}/left4dead2/.l4d2-manifest")"
+    echo "install: $({{engine}} exec "$name" cat /data/left4dead2/.l4d2-manifest)"
 
     # Give the server time to load the plugin stack before judging it.
     sleep 50
@@ -181,7 +192,7 @@ smoke: build
             fi
             echo "unknown commands: none beyond the known engine-internal one"
 
-            echo "--- volume used: $(du -sh "$scratch" | cut -f1) ---"
+            echo "--- volume used: $({{engine}} exec "$name" du -sh /data | cut -f1) ---"
             echo "smoke test passed"
             exit 0
         fi

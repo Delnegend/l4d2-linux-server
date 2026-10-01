@@ -188,7 +188,7 @@ RUN set -eux; \
 # l4dmultislots turns the spare slots into actual survivors - a joining 5th
 # player gets a survivor instead of ending up a spectator.
 ARG LEFT4DHOOKS_SHA256=1536aac340787fe6d740a7ac2696c64a3b0fda160e57644a887f5b5481e12675
-ARG L4D_PLUGINS_REF=dd1e139406779dd8ad2f421b7d336ca97f51cff3
+ARG L4D_PLUGINS_REF=3494e4786210f143d642e12b2ce6f6918bb7160b
 ARG L4D_PLUGINS_REPO=https://raw.githubusercontent.com/fbef0102/L4D1_2-Plugins
 
 COPY assets/left4dhooks.zip /tmp/left4dhooks.zip

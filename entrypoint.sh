@@ -257,6 +257,12 @@ esac
 # campaign dropped in shows up alongside the shipped ones.
 WRITABLE_DIRS="cfg addons maps scripts"
 
+# Nested one level deeper. SourceMod writes every plugin's generated config
+# into left4dead2/cfg/sourcemod/, so that directory has to be real too -
+# otherwise auto-generated configs land in the container filesystem and are
+# gone by the next restart. Paths are relative to left4dead2/ and may nest.
+WRITABLE_SUBDIRS="cfg/sourcemod"
+
 # Plain files the server rewrites or an admin edits by hand. Never links: a
 # write through a link would land in the container filesystem and vanish on
 # the next restart.
@@ -297,6 +303,17 @@ for name in ${WRITABLE_DIRS}; do
     fi
     mkdir -p "${GAME_DATA_DIR}/${name}"
     mirror_tree "${GAME_DIR}/left4dead2/${name}" "${GAME_DATA_DIR}/${name}"
+done
+
+for name in ${WRITABLE_SUBDIRS}; do
+    [ -d "${GAME_DIR}/left4dead2/${name}" ] || continue
+    target="${GAME_DATA_DIR}/${name}"
+
+    if [ -L "${target}" ]; then
+        rm -f "${target}"
+    fi
+    mkdir -p "${target}"
+    mirror_tree "${GAME_DIR}/left4dead2/${name}" "${target}"
 done
 
 for name in ${WRITABLE_GAME_FILES}; do

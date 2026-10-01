@@ -166,6 +166,62 @@ RUN set -eux; \
         /opt/l4d2/left4dead2/addons/l4dtoolz.vdf; \
     rm -rf /tmp/l4dtoolz /tmp/l4dtoolz.zip
 
+# ---------------------------------------------------------------------------
+# Left 4 DHooks and the 5+ survivor stack
+# ---------------------------------------------------------------------------
+#
+# The native half of DHooks (extensions/dhooks.ext.so) already ships inside the
+# SourceMod tarball, so the native is not the hard part. What is not on any
+# package feed is left4dhooks.smx - the plugin front-end - so that one archive
+# is vendored under assets/ and checked against a pinned sha256. The plugins
+# that use it come from a public repo, pinned to a commit.
+#
+# What the stack is for: l4dtoolz drops the lobby reservation that caps a co-op
+# campaign at 4 survivors, l4d_unreservelobby stops it coming back, and
+# l4dmultislots turns the spare slots into actual survivors - a joining 5th
+# player gets a survivor instead of ending up a spectator.
+ARG LEFT4DHOOKS_SHA256=1536aac340787fe6d740a7ac2696c64a3b0fda160e57644a887f5b5481e12675
+ARG L4D_PLUGINS_REF=3494e4786210f143d642e12b2ce6f6918bb7160b
+ARG L4D_PLUGINS_REPO=https://raw.githubusercontent.com/fbef0102/L4D1_2-Plugins
+
+COPY assets/left4dhooks.zip /tmp/left4dhooks.zip
+
+RUN set -eux; \
+    sm=/opt/l4d2/left4dead2/addons/sourcemod; \
+    echo "${LEFT4DHOOKS_SHA256}  /tmp/left4dhooks.zip" | sha256sum -c -; \
+    unzip -q /tmp/left4dhooks.zip -d /tmp; \
+    # the archive holds a `sourcemod/` tree and addons/ is where it belongs
+    cp -r /tmp/sourcemod/. "${sm}/"; \
+    fetch() { \
+        for dir in l4dmultislots l4d_CreateSurvivorBot l4d_unreservelobby; do \
+            curl -fsSL "${L4D_PLUGINS_REPO}/${L4D_PLUGINS_REF}/${dir}/$1" -o /tmp/dl && return 0; \
+        done; \
+        echo "could not fetch $1" >&2; return 1; \
+    }; \
+    fetch plugins/l4d_unreservelobby.smx        && mv /tmp/dl "${sm}/plugins/l4d_unreservelobby.smx"; \
+    fetch plugins/l4dmultislots.smx             && mv /tmp/dl "${sm}/plugins/l4dmultislots.smx"; \
+    fetch plugins/l4d_CreateSurvivorBot.smx     && mv /tmp/dl "${sm}/plugins/l4d_CreateSurvivorBot.smx"; \
+    fetch gamedata/l4d_CreateSurvivorBot.txt    && mv /tmp/dl "${sm}/gamedata/l4d_CreateSurvivorBot.txt"; \
+    fetch translations/l4dmultislots.phrases.txt && mv /tmp/dl "${sm}/translations/l4dmultislots.phrases.txt"; \
+    rm -rf /tmp/sourcemod /tmp/left4dhooks.zip /tmp/dl
+
+# l4dmultislots is compiled against the Multi-Colors include, and SourceMod
+# decides a library is present by finding its .inc on disk at load time.
+RUN set -eux; \
+    curl -fsSL -o /tmp/mc.zip \
+        "https://github.com/fbef0102/L4D1_2-Plugins/releases/download/Multi-Colors/multicolors.zip"; \
+    unzip -q /tmp/mc.zip -d /tmp/mc; \
+    cp -r /tmp/mc/scripting/include/. \
+        /opt/l4d2/left4dead2/addons/sourcemod/scripting/include/; \
+    rm -rf /tmp/mc /tmp/mc.zip; \
+    chown -R steam:steam /opt/l4d2/left4dead2/addons; \
+    chown steam:steam /opt/l4d2/left4dead2/cfg
+
+# Ship the two cvars that make it a 5+ server out of the box. See
+# docs/eight-players.md for how to change them on the volume.
+COPY --chown=steam:steam l4dmultislots.cfg /opt/l4d2/left4dead2/cfg/sourcemod/l4dmultislots.cfg
+
+
 COPY --chown=steam:steam server_custom.cfg /defaults/server_custom.cfg
 
 COPY --chown=steam:steam entrypoint.sh /entrypoint.sh

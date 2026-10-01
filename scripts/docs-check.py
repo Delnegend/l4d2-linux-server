@@ -97,9 +97,10 @@ for path in DOCS:
     for target in re.findall(r"--target (\w+)", text):
         if target not in stages:
             fail(f"{path.relative_to(ROOT)}: --target {target} is not a Dockerfile stage")
-    for target in re.findall(r"\b(fetch|base|server|qol|coop8)\b", text):
-        if target not in stages:
-            fail(f"{path.relative_to(ROOT)}: mentions target '{target}', which no longer exists")
+    # Deliberately no word-list check: `base` and `fetch` are ordinary English,
+    # so a prose mention cannot be told from a stale claim. `--target` is the
+    # check that actually bites.
+
 
 # Every stage must be documented, so a new one cannot appear unnoticed.
 arch = read(ROOT / "docs/architecture.md")
@@ -111,15 +112,31 @@ for stage in sorted(stages):
 # ---------------------------------------------------------------------------
 # 4. Build argument defaults in the docs match the Dockerfile
 # ---------------------------------------------------------------------------
-declared = dict(re.findall(r"^ARG ([A-Z_]+)=(.*)$", dockerfile, re.M))
-for name, default in re.findall(r"^\| `([A-Z_]+)` \| `([^`]*)` \|", arch, re.M):
-    if name not in declared:
-        fail(f"docs/architecture.md: build arg {name} is not declared in the Dockerfile")
-    elif declared[name] != default:
-        fail(
-            f"docs/architecture.md: {name} default '{default}' "
-            f"!= Dockerfile '{declared[name]}'"
-        )
+# Long pins - a depot manifest id, a commit sha, a checksum - are documented
+# truncated with an ellipsis, so a documented value is checked as a prefix of
+# the declared default rather than against it whole. Allowing digits in the
+# name, and matching the combined `A` / `B` rows, is what brings GAME_MANIFEST,
+# L4D_PLUGINS_REF and L4DTOOLZ_BUILD under this check at all - and those are
+# precisely the pins scripts/apply-bump.py rewrites.
+declared = dict(re.findall(r"^ARG ([A-Z0-9_]+)=(.*)$", dockerfile, re.M))
+build_arg_row = re.compile(
+    r"^\| (`[A-Z0-9_]+`(?: / `[A-Z0-9_]+`)*) \| (`[^`]+`(?: / `[^`]+`)*) \|", re.M
+)
+
+for names_cell, values_cell in build_arg_row.findall(arch):
+    names = re.findall(r"`([^`]+)`", names_cell)
+    values = re.findall(r"`([^`]+)`", values_cell)
+    if len(names) != len(values):
+        fail(f"docs/architecture.md: build arg row '{names_cell}' does not have one value per arg")
+        continue
+    for name, value in zip(names, values):
+        if name not in declared:
+            fail(f"docs/architecture.md: build arg {name} is not declared in the Dockerfile")
+        elif not declared[name].startswith(value.removesuffix("…")):
+            fail(
+                f"docs/architecture.md: {name} default '{value}' "
+                f"is not a prefix of Dockerfile '{declared[name]}'"
+            )
 
 
 # ---------------------------------------------------------------------------

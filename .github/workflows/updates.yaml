@@ -1,0 +1,185 @@
+name: Upstream updates
+
+# One check a day against the three things this repository pins: Valve's depot
+# manifest, l4dtoolz's newest stable release, and the head of the 5+ plugin
+# repo. Anything stale becomes one pull request that rewrites the Dockerfile
+# ARGs and the architecture table, and merges itself once CI is green.
+#
+# MetaMod and SourceMod are deliberately not pinned - the Dockerfile resolves
+# both to the newest build on SOURCEMOD_BRANCH - so they appear in the report
+# and nothing else.
+on:
+  schedule:
+    # 02:17 UTC, off the top of the hour where every other cron lands.
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-updates
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      pins_stale: ${{ steps.upstream.outputs.pins_stale }}
+      pins_summary: ${{ steps.upstream.outputs.pins_summary }}
+      game_manifest: ${{ steps.upstream.outputs.game_manifest }}
+      launcher_manifest: ${{ steps.upstream.outputs.launcher_manifest }}
+      l4dtoolz_version: ${{ steps.upstream.outputs.l4dtoolz_version }}
+      l4dtoolz_build: ${{ steps.upstream.outputs.l4dtoolz_build }}
+      plugins_ref: ${{ steps.upstream.outputs.plugins_ref }}
+      sourcemod_branch: ${{ steps.upstream.outputs.sourcemod_branch }}
+      mmsource_drop: ${{ steps.upstream.outputs.mmsource_drop }}
+      sourcemod_drop: ${{ steps.upstream.outputs.sourcemod_drop }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Compare the pins with upstream
+        id: upstream
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/resolve-upstream.py | tee -a "$GITHUB_OUTPUT"
+
+  bump:
+    needs: resolve
+    if: needs.resolve.outputs.pins_stale == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Rewrite the pins in the Dockerfile and the architecture table
+        run: |
+          python3 scripts/apply-bump.py \
+            --game-manifest '${{ needs.resolve.outputs.game_manifest }}' \
+            --launcher-manifest '${{ needs.resolve.outputs.launcher_manifest }}' \
+            --l4dtoolz-version '${{ needs.resolve.outputs.l4dtoolz_version }}' \
+            --l4dtoolz-build '${{ needs.resolve.outputs.l4dtoolz_build }}' \
+            --plugins-ref '${{ needs.resolve.outputs.plugins_ref }}'
+
+      - name: Open the pull request and queue it for merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if gh pr list --state open \
+               --search 'bump the pinned upstream versions in:title' \
+               --json number --jq '.[0].number' | grep -q .; then
+            echo "An update pull request is already open; leaving it alone."
+            exit 0
+          fi
+
+          branch="automation/bump-$(date -u +%Y%m%d)"
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git commit -am 'build: bump the pinned upstream versions'
+          git push -u origin "$branch"
+
+          gh pr create \
+            --title 'build: bump the pinned upstream versions' \
+            --body "$(cat <<'BODY'
+          Upstream moved; the pins in `Dockerfile` no longer match it.
+
+          ```
+          ${{ needs.resolve.outputs.pins_summary }}
+          ```
+
+          `scripts/resolve-upstream.py` found the difference and
+          `scripts/apply-bump.py` rewrote the `ARG` defaults and the matching
+          rows in `docs/architecture.md`.
+
+          - **Valve** — `GAME_MANIFEST` (depot 222861, the game) and
+            `LAUNCHER_MANIFEST` (depot 222863, which is where `srcds_run`
+            lives). The entrypoint downloads both on the first start of a
+            volume, and re-downloads when either one changes.
+          - **l4dtoolz** — the newest stable release carrying a
+            `l4dtoolz-<version>-<build>.zip`.
+          - **5+ plugins** — the head commit of
+            [fbef0102/L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins).
+
+          `just verify` downloads both pinned manifests, boots the server and
+          checks the plugin stack, so a green `Check (just verify)` is the
+          proof. Merging does not publish: `publish.yaml` still needs a release.
+
+          MetaMod and SourceMod are not pinned and need nothing here. The
+          current drops on `${{ needs.resolve.outputs.sourcemod_branch }}` are
+          `${{ needs.resolve.outputs.mmsource_drop }}` and
+          `${{ needs.resolve.outputs.sourcemod_drop }}`.
+          BODY
+          )"
+
+          # Merges itself the moment `Check (just verify)` goes green. Requires
+          # auto-merge and branch protection to be enabled on the repository;
+          # see docs/maintenance.md for the two `gh` commands that set it up.
+          gh pr merge --auto --rebase
+
+  report:
+    # Runs whether or not anything was stale: this is the record of where the
+    # pins actually are, so a quiet week is still readable.
+    needs: resolve
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+      - name: Record the current pin state
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const summary = `${{ needs.resolve.outputs.pins_summary }}`
+            const stale = !summary.startsWith('every pin matches')
+
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            })
+            const board = open.data.find((issue) => issue.title === 'Upstream pin state')
+
+            const body = [
+              'Upstream state as of this run. Edited in place, not re-posted.',
+              '',
+              '```',
+              summary,
+              '```',
+              '',
+              `- depot 222861 manifest: \`${{ needs.resolve.outputs.game_manifest }}\``,
+              `- depot 222863 manifest: \`${{ needs.resolve.outputs.launcher_manifest }}\` (srcds_run)`,
+              `- MetaMod:Source drop: \`${{ needs.resolve.outputs.mmsource_drop }}\``,
+              `- SourceMod drop: \`${{ needs.resolve.outputs.sourcemod_drop }}\``,
+              '',
+              stale
+                ? 'Something was stale: see the open "bump the pinned upstream versions" pull request.'
+                : 'Nothing is stale, so no pull request was opened.',
+            ].join('\n')
+
+            // One issue, edited in place, so this reads as a status board rather
+            // than a daily pile of noise. Matching on the title keeps it from
+            // depending on a label that may not exist in the repository.
+            if (board) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: board.number,
+                body,
+              })
+              return
+            }
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'Upstream pin state',
+              body,
+            })

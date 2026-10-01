@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    # Branch protection requires exactly this check name. Auto-merge is only
+    # ever enabled on it, so nothing lands without a real boot behind it.
+    name: Check (just verify)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up just
+        uses: extractions/setup-just@v4
+
+      # The image carries no game files, so the build is ~440 MB and finishes in
+      # about a minute. The 10 GB install happens inside `just smoke`, onto the
+      # runner's own disk, which is the one cost this design does not remove.
+      #
+      # CONTAINER_ENGINE=docker because the runner's engine is docker: rootless
+      # podman there would need uid mappings the image does not configure. The
+      # justfile chowns the scratch volume to 1000 to match.
+      - name: Docs check, install, A2S self-check, plugin stack
+        run: just verify
+        env:
+          CONTAINER_ENGINE: docker
+          L4D2_SMOKE_DIR: ${{ github.workspace }}/.smoke

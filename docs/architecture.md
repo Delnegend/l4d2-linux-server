@@ -132,6 +132,10 @@ is 1.13, and the 1.11 line is kept as a legacy branch. It is also what the
 5+/8-player plugins are compiled against; see
 [eight-players.md](eight-players.md).
 
+`GAME_MANIFEST`, `LAUNCHER_MANIFEST`, `L4DTOOLZ_VERSION`, `L4DTOOLZ_BUILD` and
+`L4D_PLUGINS_REF` are the five the update workflow rewrites; see
+[maintenance.md](maintenance.md#automated-update-checks).
+
 ## The install and the volume
 
 Everything is on the volume. `/data` is the volume and stays the server's

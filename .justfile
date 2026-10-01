@@ -1,7 +1,7 @@
 # Development commands for the L4D2 dedicated server image.
 #
 # Run `just` with no arguments for the list. `just check` is the gate to run
-# before pushing anything.
+# before pushing anything; `just verify` is everything CI does.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -18,8 +18,27 @@ registry := env_var_or_default("L4D2_REGISTRY", "ghcr.io/delnegend/l4d2-linux-se
 compression_format := env_var_or_default("L4D2_COMPRESSION", "zstd")
 compression_level := env_var_or_default("L4D2_COMPRESSION_LEVEL", "4")
 
+# Container engine. Local runs use podman; CI sets CONTAINER_ENGINE=docker,
+# which is the engine a GitHub runner comes with. `push` is the exception and
+# stays podman-only: --compression-format is a podman flag, not a docker one.
+engine := env_var_or_default("CONTAINER_ENGINE", "podman")
+
+# Rootless podman maps the container's uid 1000 onto the host user with
+# keep-id. Rootful docker cannot remap uids at all, so on CI the volume is
+# chowned to 1000 instead. Everything below takes the same commands on both.
+userns := if engine == "docker" { "" } else { "--userns=keep-id" }
+own_volume := if engine == "docker" { "sudo chown -R 1000:1000 \"$scratch\"" } else { "true" }
+
+# The image carries no game files, so the ~10 GB install lands on the volume at
+# run time. The smoke volume therefore cannot be a tmpfs - it needs real disk -
+# and it lives under L4D2_SMOKE_DIR (the working tree by default) so where that
+# disk is stays obvious and `just clean` can find it.
+smoke_dir := env_var_or_default("L4D2_SMOKE_DIR", ".smoke")
+install_gb := "11"
+install_timeout := env_var_or_default("L4D2_INSTALL_TIMEOUT", "2400")
+
 # Build arguments. Anything here can be overridden from the environment, e.g.
-#   MAX_DOWNLOADS=32 just build
+#   SOURCEMOD_BRANCH=1.13 just build
 build_args := "--build-arg SERVER_VERSION=" + version + " --build-arg MAX_DOWNLOADS=" + env_var_or_default("MAX_DOWNLOADS", "16") + " --build-arg SOURCEMOD_BRANCH=" + env_var_or_default("SOURCEMOD_BRANCH", "1.12")
 
 # List the available recipes.
@@ -31,85 +50,160 @@ config:
     @echo "published image   {{image}}"
     @echo "version           {{version}}  ->  tag {{local_tag}}"
     @echo "registry          {{registry}}"
+    @echo "engine            {{engine}}"
     @echo "compression       {{compression_format}} level {{compression_level}}"
     @echo "build args        {{build_args}}"
 
-# Build the published image. This is the `server` target, which is also the
-# last stage, so no --target is needed.
+# Build the image: one target, and it is the last stage.
 build:
-    podman build {{build_args}} -t {{local_tag}} .
-
-# Build only the `base` stage: the vanilla install with no mods, no
-# entrypoint. Useful for measuring the install itself; not deployable.
-build-base:
-    podman build --target base {{build_args}} -t localhost/l4d2:base .
+    {{engine}} build {{build_args}} -t {{local_tag}} .
 
 # Run the locally built image with compose, recreating the container.
 up: build
-    L4D2_IMAGE={{local_tag}} podman compose up -d --force-recreate
+    #!/usr/bin/env bash
+    # The first start of a volume downloads the pinned depot manifest, ~10 GB,
+    # once. Later starts reuse it.
+    set -euo pipefail
+    L4D2_IMAGE={{local_tag}} {{engine}} compose up -d --force-recreate
 
 # Run the published image with compose, pulling it first.
 up-remote:
-    podman compose pull
-    podman compose up -d
+    {{engine}} compose pull
+    {{engine}} compose up -d
 
 down:
-    podman compose down
+    {{engine}} compose down
 
 # Follow the server log.
 logs:
-    podman compose logs -f
+    {{engine}} compose logs -f
 
-# Open a shell in the running server. The game dir is /data, the image's
-# install is /opt/l4d2.
+# Open a shell in the running server, where the install lives on the volume.
 shell:
-    podman compose exec l4d2 /bin/bash
+    {{engine}} compose exec l4d2 /bin/bash
 
 # Run a one-shot command in the running server, e.g. `just run-in rcon-help`.
 run-in command:
-    podman compose exec l4d2 /bin/bash -c "{{command}}"
+    {{engine}} compose exec l4d2 /bin/bash -c "{{command}}"
 
-# Boot the freshly built image on a scratch volume and wait for the server to
-# report itself discoverable. Fails if SELF-CHECK FAILED shows up.
+# Boot the freshly built image on a scratch volume: install, A2S, plugin stack.
+#
+# It downloads ~11 GB into that volume every run, because a scratch volume has
+# no install to reuse - the price of an image that does not carry the game.
 smoke: build
     #!/usr/bin/env bash
     set -euo pipefail
-    scratch="$(mktemp -d)"
+
+    # `logs | grep -q` is a trap under `pipefail`: grep -q exits on the first
+    # match, the writer takes SIGPIPE, and the pipeline reports non-zero - so a
+    # line that IS in the log reads as missing. It is certain here, because the
+    # download writes hundreds of megabytes of progress. Counting instead of
+    # matching reads the stream to the end, and --tail keeps it bounded.
+    log_has() {
+        [ "$({{engine}} logs --tail 400 "$1" 2>&1 | grep -c -F -- "$2" || true)" -gt 0 ]
+    }
+
+    mkdir -p "{{smoke_dir}}"
+    scratch="$(mktemp -d "{{smoke_dir}}/vol-XXXXXX")"
     name="l4d2-smoke-$$"
-    trap 'podman rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
-    podman run -d --name "$name" \
-        --userns=keep-id --user 1000:1000 \
+    trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
+
+    avail_mb="$(df -Pm "$(dirname "$scratch")" | awk 'NR==2 {print $4}')"
+    if [ "${avail_mb}" -lt $(( {{install_gb}} * 1000 )) ]; then
+        echo "smoke test needs about {{install_gb}} GB of real disk on $(dirname "$scratch")," >&2
+        echo "and there is only ${avail_mb} MB. Point L4D2_SMOKE_DIR at a bigger filesystem." >&2
+        exit 1
+    fi
+
+    {{own_volume}}
+    {{engine}} run -d --name "$name" \
+        {{userns}} --user 1000:1000 \
         -e PORT=27099 -e STEAM_GROUP_ID=46303910 \
         -p 27099:27099/udp -p 27099:27099/tcp \
         -v "$scratch:/data:Z" \
         {{local_tag}} >/dev/null
+
+    # The stamp is the install's own statement that it is finished, and the same
+    # one the entrypoint reads to decide whether to skip the download. Testing
+    # the file on the volume rather than a log line is both cheaper and the more
+    # honest check: it is exactly the condition the next start depends on.
+    echo "waiting for the install on the volume (up to $(( {{install_timeout}} / 60 )) min)..."
+    deadline=$((SECONDS + {{install_timeout}}))
+    ready=0
+    while [ "${SECONDS}" -lt "${deadline}" ]; do
+        if [ -f "${scratch}/left4dead2/.l4d2-manifest" ] && [ -x "${scratch}/srcds_run" ]; then
+            ready=1
+            break
+        fi
+        if [ "$({{engine}} inspect -f '{{"{{.State.Running}}"}}' "$name" 2>/dev/null)" != "true" ]; then
+            {{engine}} logs --tail 40 "$name" 2>&1 || true
+            echo "smoke test FAILED: the container exited before the install was ready" >&2
+            exit 1
+        fi
+        sleep 15
+    done
+    if [ "${ready}" -ne 1 ]; then
+        {{engine}} logs --tail 40 "$name" 2>&1 || true
+        echo "smoke test FAILED: no install within $(( {{install_timeout}} / 60 )) min" >&2
+        exit 1
+    fi
+    echo "install: $(cat "${scratch}/left4dead2/.l4d2-manifest")"
+
+    # Give the server time to load the plugin stack before judging it.
+    sleep 50
+
+    if [ "$({{engine}} logs "$name" 2>&1 | grep -cE '\[SM\].*(Unable|Error|Exception)' || true)" -gt 0 ]; then
+        {{engine}} logs "$name" 2>&1 | grep -E '\[SM\]' | sed -n '1,10p' || true
+        echo "smoke test FAILED: the plugin stack did not load" >&2
+        exit 1
+    fi
+    echo "plugins installed: $({{engine}} exec "$name" ls /data/left4dead2/addons/sourcemod/plugins/ | grep -cE 'left4dhooks|multislots|unreservelobby|CreateSurvivorBot') of 4"
+    echo "l4dmultislots.cfg:  $({{engine}} exec "$name" grep -c '^l4d_' /data/left4dead2/cfg/sourcemod/l4dmultislots.cfg) cvars"
+
     echo "waiting for the A2S self-check (up to 120s)..."
     for _ in $(seq 1 60); do
-        sleep 2
-        if podman logs "$name" 2>&1 | grep -q "Self-check OK"; then
-            podman logs "$name" 2>&1 | grep -E "Self-check OK|Players:|Appending" || true
+        if log_has "$name" "Self-check OK"; then
+            {{engine}} logs "$name" 2>&1 | grep -E "Self-check OK|Players:|Appending" || true
+
+            # Post-update check 2 from docs/maintenance.md: a game build that
+            # drops a cvar shows up here and nowhere else, because the engine is
+            # silent about unknown commands everywhere except the log. One line
+            # is known and expected.
+            unknown="$({{engine}} logs "$name" 2>&1 \
+                | grep -o 'Unknown command "[^"]*"' | sort -u || true)"
+            unexpected="$(printf '%s\n' "${unknown}" \
+                | grep -v 'mat_bloom_scalefactor_scalar' | grep -v '^$' || true)"
+            if [ -n "${unexpected}" ]; then
+                echo "unknown console commands in the boot log:" >&2
+                printf '%s\n' "${unexpected}" >&2
+                echo "smoke test FAILED: the engine rejected a command the config uses" >&2
+                exit 1
+            fi
+            echo "unknown commands: none beyond the known engine-internal one"
+
             echo "--- volume used: $(du -sh "$scratch" | cut -f1) ---"
             echo "smoke test passed"
             exit 0
         fi
-        if podman logs "$name" 2>&1 | grep -q "SELF-CHECK FAILED"; then
-            podman logs "$name" 2>&1 | tail -40
+        if log_has "$name" "SELF-CHECK FAILED"; then
+            {{engine}} logs --tail 40 "$name" 2>&1 || true
             echo "smoke test FAILED: the server is not discoverable" >&2
             exit 1
         fi
+        sleep 2
     done
-    podman logs "$name" 2>&1 | tail -40
+    {{engine}} logs --tail 40 "$name" 2>&1 || true
     echo "smoke test FAILED: no self-check line within 120s" >&2
     exit 1
 
-# Layer sizes per image, which is how the 10 GB duplicate-layer regression in
-# docs/architecture.md was caught.
+# Layer sizes per image.
 sizes:
     podman images --filter reference='localhost/l4d2*'
     @echo "--- layers of {{local_tag}}, largest first ---"
     podman history {{local_tag}} --format json | python3 -c 'import json,sys; [print("%10.1f MB  %s" % (l["size"]/1e6, l["CreatedBy"][:66])) for l in sorted(json.load(sys.stdin), key=lambda l: -l["size"])[:8]]'
 
-# Push the locally built image, compressed as zstd level 4.
+# Push the locally built image, compressed as zstd level 4. Podman only, since
+# --compression-format is not a docker flag.
 push: build
     podman tag {{local_tag}} {{registry}}:{{version}}
     podman push --compression-format {{compression_format}} \
@@ -120,43 +214,15 @@ push: build
 
 # Remove local images and containers. Does not touch the ./data volume.
 clean:
-    podman rm -f l4d2-smoke-* 2>/dev/null || true
-    -podman rmi -f $(podman images -q --filter reference='localhost/l4d2*') 2>/dev/null
-    @echo "removed local build images; ./data was left alone"
+    {{engine}} rm -f l4d2-smoke-* 2>/dev/null || true
+    -{{engine}} rmi -f $({{engine}} images -q --filter reference='localhost/l4d2*') 2>/dev/null
+    -rm -rf "{{smoke_dir}}"
+    @echo "removed local build images and the smoke volumes; ./data was left alone"
 
-# Full clean, including the downloaded game in the local build cache. Slow and
-# irreversible: the next build re-downloads ~10 GB.
-clean-all:
-    podman rmi -f $(podman images -q --filter reference='localhost/l4d2*') 2>/dev/null || true
-    podman builder prune -f
-    @echo "pruned the build cache; the next build re-downloads the game"
-
-# Validate the docs against the code: every relative link and anchor resolves,
-# the variable table matches .env.example and entrypoint.sh, documented build
-# arguments and --target values exist, and the workflow's tags are the ones the
-# docs advertise.
+# Validate the docs against the code they describe. See scripts/docs-check.py.
 check:
     python3 scripts/docs-check.py
 
-# Confirm the 5+ plugin stack actually loaded. A clean boot prints no [SM]
-# lines at all; any of them means a dependency is missing.
-smoke-plugins: build
-    #!/usr/bin/env bash
-    set -euo pipefail
-    scratch="$(mktemp -d)"; name="l4d2-plugins-$$"
-    trap 'podman rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
-    podman run -d --name "$name" --userns=keep-id --user 1000:1000 \
-        -e PORT=27097 -p 27097:27097/udp -p 27097:27097/tcp \
-        -v "$scratch:/data:Z" {{local_tag}} >/dev/null
-    sleep 50
-    if podman logs "$name" 2>&1 | grep -qE "\[SM\].*(Unable|Error|Exception)"; then
-        podman logs "$name" 2>&1 | grep -E "\[SM\]" | head -10
-        echo "plugin stack FAILED to load" >&2; exit 1
-    fi
-    echo "plugins on the image: $(podman exec "$name" ls /data/left4dead2/addons/sourcemod/plugins/ | grep -cE 'left4dhooks|multislots|unreservelobby|CreateSurvivorBot') of 4"
-    echo "l4dmultislots.cfg:  $(podman exec "$name" grep -c '^l4d_' /data/left4dead2/cfg/sourcemod/l4dmultislots.cfg) cvars"
-    echo "plugin stack OK"
-
 # Everything CI does, before pushing.
-verify: check smoke smoke-plugins
-    @echo "check + smoke + plugin stack all passed"
+verify: check smoke
+    @echo "check + smoke (install, A2S self-check, plugin stack) all passed"

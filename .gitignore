@@ -1,6 +1,9 @@
 # Server game data and binaries
 data/
 
+# Scratch volumes for `just smoke`: ~11 GB while it runs, removed on the way out
+.smoke/
+
 # Environment / local secrets
 .env
 

@@ -1,9 +1,10 @@
 # Left 4 Dead 2 Linux Dedicated Server (Docker / Podman)
 
-A Left 4 Dead 2 dedicated server container that downloads the game **at build
-time** with [DepotDownloader](https://github.com/SteamRE/DepotDownloader) and
-bakes it into the image. A cold start is instant: there is no first-boot
-download, and the container never needs a Steam login.
+A Left 4 Dead 2 dedicated server container that installs the game on the
+**first start of a volume** with
+[DepotDownloader](https://github.com/SteamRE/DepotDownloader), from a pinned
+Steam depot manifest. The image is 528 MB rather than 10 GB, and every restart
+after the first is instant.
 
 Prebuilt images are published to `ghcr.io/delnegend/l4d2-linux-server`.
 
@@ -40,9 +41,9 @@ podman compose logs -f
 ```
 
 That is the whole install: `compose.yaml` references the published image, so
-nothing is built on your machine. Expect `Self-check OK: server answers A2S
-queries` in the log within a minute — that line is the server telling you it is
-discoverable.
+nothing is built on your machine. The first start downloads the game — about
+10 GB — so expect a multi-minute wait before `Self-check OK: server answers A2S
+queries` appears in the log. Every later start is instant.
 
 ### Image tags
 
@@ -58,9 +59,9 @@ no per-target tag, and a deployment should always name an exact version.
 
 Copy `.env.example` and change what you care about. The variables you are most
 likely to touch:
-
 | Variable | Default | Does |
 |---|---|---|
+| `GAME_MANIFEST` | the image's value | Which Steam depot manifest to install. Set it to move to a new Valve build without a new image. |
 | `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
 | `RCON_PASSWORD` | `ChangeThisRcon123` | `rcon_password` — change it |
 | `DEFAULT_MAP` | `c1m1_hotel` | `+map` |
@@ -78,13 +79,14 @@ co-op campaign to four survivors is something else entirely — see
 
 ## What you get
 
-- **Build-time install** — the full server including the DLC campaigns, fetched
-  in parallel at build time and baked in.
-- **A ~1 MB volume** — the read-only game content stays in the image and is
-  linked into `/data` at start-up. Nothing is ever copied.
+- **A small image** — 528 MB instead of 10.3 GB, because Valve's 10 GB is not in
+  it. The install lands on the volume once, from a manifest you can pin per
+  deployment, and is reused from then on.
 - **No host dependencies** — the 32-bit runtime libraries are included; it runs
   on Fedora CoreOS, Ubuntu, Debian, Arch and friends without multilib.
-- **SourceMod, MetaMod and l4dtoolz baked in** — nothing is installed at boot.
+- **SourceMod, MetaMod and l4dtoolz included** — staged in the image and applied
+  on every start, so an image update reaches a server whose volume already has
+  the game.
 - **Template-driven config** — `server.cfg` is regenerated from a template on
   every start, so environment variables are the single source of truth, and
   `server_custom.cfg` holds everything they don't cover.
@@ -130,9 +132,9 @@ podman build -t localhost/l4d2:dev .
 ```
 
 `compose.yaml` points at the published image, so `just up` sets `L4D2_IMAGE` to
-the local tag. To build the `base` stage alone — the vanilla install with no
-mods and no entrypoint — use `just build-base`; it is for measuring the install,
-not for deploying.
+the local tag. There is no `base` stage to build separately any more: the game
+is not in the image at all, so the build is 528 MB and takes about half a
+minute. `just smoke` then downloads the game onto a scratch volume and boots it.
 
 Requires [just](https://github.com/casey/just) and podman. See
 [docs/architecture.md](docs/architecture.md) for the build arguments and

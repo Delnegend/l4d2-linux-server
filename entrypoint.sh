@@ -6,9 +6,9 @@ echo " Left 4 Dead 2 Linux Dedicated Server            "
 echo "=================================================="
 
 DATA_DIR="/data"
-# The install is baked into the image; DATA_DIR is the volume. See "Game files"
-# below for how the two are joined.
-GAME_DIR="${GAME_DIR:-/opt/l4d2}"
+# Captured before validation so a failed check can name what was actually set.
+WANTED_MANIFEST="${GAME_MANIFEST:-}"
+WANTED_LAUNCHER="${LAUNCHER_MANIFEST:-}"
 
 # The player count is a property of this image, not a runtime knob.
 MAX_PLAYERS=8
@@ -69,33 +69,6 @@ reject_flag() {
                 "Remove '${flag}' from EXTRA_ARGS and restart the container."
             ;;
     esac
-}
-
-# Mirror one directory level.
-#
-# Every entry of the image directory appears in the data directory, as a
-# symlink - unless the data directory already holds a real entry of that name,
-# which always wins. That rule is what makes this non-destructive: an old
-# volume carrying a full install keeps every one of its files, and only gains
-# links for whatever the image adds.
-mirror_tree() {
-    local src="$1" dst="$2" entry name
-
-    mkdir -p "${dst}"
-    shopt -s nullglob dotglob
-    for entry in "${src}"/*; do
-        name="$(basename "${entry}")"
-        if [ -L "${dst}/${name}" ] && [ ! -e "${dst}/${name}" ]; then
-            # The image dropped this file; keeping the link would leave a
-            # dangling symlink behind.
-            rm -f "${dst}/${name}"
-        fi
-        if [ -e "${dst}/${name}" ] || [ -L "${dst}/${name}" ]; then
-            continue
-        fi
-        ln -s "${entry}" "${dst}/${name}"
-    done
-    shopt -u nullglob dotglob
 }
 
 # Post-boot visibility self-check.
@@ -243,106 +216,193 @@ case " ${EXTRA_ARGS} " in
 esac
 
 # ---------------------------------------------------------------------------
-# Game files
+# Game install
 # ---------------------------------------------------------------------------
 #
-# The ~20 GB install is baked into the image at GAME_DIR. DATA_DIR is the
-# volume, and it stays the server's working directory - the layout the engine,
-# the config paths and every admin tool already expect. The join is a farm of
-# symlinks: read-only game content is linked in from the image, while the
-# directories and files the server or an admin writes to are real.
+# The install lives on the volume, not in the image. The ~10 GB of Valve content
+# is downloaded on the first start and reused on every start after that - a stamp
+# file inside left4dead2/ records which manifests produced the tree.
 #
-# Directories under left4dead2/ the server and the admin write to. Each becomes
-# a real directory whose own entries are links, so a workshop map or a custom
-# campaign dropped in shows up alongside the shipped ones.
-WRITABLE_DIRS="cfg addons maps scripts"
+# DATA_DIR is both the volume and the server's working directory, which is the
+# layout the engine, the config paths and every admin tool already expect:
+# srcds_run at its root, left4dead2/ beside it. There is nothing to join, so
+# there are no symlinks and nothing is ever copied out of the image except the
+# mod overlay.
+#
+# A volume whose stamp matches is left completely alone. A volume carrying any
+# other stamp is replaced wholesale rather than merged: a manifest describes a
+# whole depot, and a half-old, half-new install is not a state this can reach.
+# left4dead2/cfg is the single exception, because it is the operator's.
 
-# Nested one level deeper. SourceMod writes every plugin's generated config
-# into left4dead2/cfg/sourcemod/, so that directory has to be real too -
-# otherwise auto-generated configs land in the container filesystem and are
-# gone by the next restart. Paths are relative to left4dead2/ and may nest.
-WRITABLE_SUBDIRS="cfg/sourcemod"
+INSTALL_DIR="${DATA_DIR}/left4dead2"
+MANIFEST_STAMP="${INSTALL_DIR}/.l4d2-manifest"
 
-# Plain files the server rewrites or an admin edits by hand. Never links: a
-# write through a link would land in the container filesystem and vanish on
-# the next restart.
-WRITABLE_GAME_FILES="motd.txt mapcycle.txt missioncycle.txt maplist.txt"
-WRITABLE_DATA_FILES="console.log"
-
-if [ ! -d "${GAME_DIR}/left4dead2" ]; then
+if [ ! -x "${DEPOT_DOWNLOADER}" ]; then
     fail \
-        "No server install at ${GAME_DIR}." \
+        "${DEPOT_DOWNLOADER} is missing or not executable." \
         "" \
-        "This image bakes the game files in, so the install is missing from the" \
-        "image itself. If you are running the 'qol' image, check that the image" \
-        "was not rebuilt with --no-cache after the install layer was pruned."
+        "This image downloads the game at start-up rather than carrying it, so" \
+        "the downloader has to be there. If you are running an image you built" \
+        "yourself, check that the entrypoint is the published one."
 fi
 
-log "Linking the image install (${GAME_DIR}) into ${DATA_DIR}..."
-mirror_tree "${GAME_DIR}" "${DATA_DIR}"
+# Two manifests, because the install is two depots: the game, and the launcher
+# depot that provides srcds_run. Steam versions them independently - the game
+# depot has not moved since 2024, the launcher depot moves far more often - so
+# one pin cannot describe an install and one would leave the server binary
+# unpinned.
+check_manifest() {
+    local name="$1" value="$2"
+    case "${value}" in
+        ''|*[!0-9]*)
+            fail \
+                "${name} is '${value}', which is not a Steam depot manifest id." \
+                "" \
+                "It is a decimal number - the gid of the depot's public manifest." \
+                "The image's own defaults are the ARG lines of those names in the" \
+                "Dockerfile; override them in .env to move this deployment to a" \
+                "different Valve build."
+            ;;
+    esac
+}
+check_manifest GAME_MANIFEST "${WANTED_MANIFEST}"
+check_manifest LAUNCHER_MANIFEST "${WANTED_LAUNCHER}"
 
-GAME_DATA_DIR="${DATA_DIR}/left4dead2"
+GAME_MANIFEST="${WANTED_MANIFEST}"
+LAUNCHER_MANIFEST="${WANTED_LAUNCHER}"
+APP_ID="${APP_ID:-222860}"
+GAME_DEPOT="${GAME_DEPOT:-222861}"
+LAUNCHER_DEPOT="${LAUNCHER_DEPOT:-222863}"
+MAX_DOWNLOADS="${MAX_DOWNLOADS:-16}"
+OVERLAY_DIR="${OVERLAY_DIR:-/opt/l4d2-overlay}"
 
-# left4dead2/ is linked by the mirroring above, and it has to be a real
-# directory before its contents can be linked into it - otherwise the links
-# would be written into the image instead of the volume. An old volume that
-# already holds a real install is left alone.
-if [ -L "${GAME_DATA_DIR}" ]; then
-    rm -f "${GAME_DATA_DIR}"
+# The identity of an install. Both depot/manifest pairs, because one alone does
+# not name a tree the server can actually start from.
+WANTED_INSTALL="${GAME_DEPOT}=${GAME_MANIFEST} ${LAUNCHER_DEPOT}=${LAUNCHER_MANIFEST}"
+
+installed="none"
+if [ -f "${MANIFEST_STAMP}" ]; then
+    installed="$(cat "${MANIFEST_STAMP}")"
 fi
-mkdir -p "${GAME_DATA_DIR}"
-mirror_tree "${GAME_DIR}/left4dead2" "${GAME_DATA_DIR}"
 
-for name in ${WRITABLE_DIRS}; do
-    [ -d "${GAME_DIR}/left4dead2/${name}" ] || continue
-
-    # The mirroring above linked this directory; replace that link with a real
-    # directory, which is what lets files be added to it.
-    if [ -L "${GAME_DATA_DIR}/${name}" ]; then
-        rm -f "${GAME_DATA_DIR}/${name}"
+if [ "${installed}" = "${WANTED_INSTALL}" ] && [ -x "${DATA_DIR}/srcds_run" ]; then
+    log "Install present on the volume: ${WANTED_INSTALL}."
+else
+    if [ "${installed}" != "none" ]; then
+        log "Volume carries ${installed}."
+        log "This image pins ${WANTED_INSTALL}."
+        log "Replacing the install. left4dead2/cfg is kept, everything else is rebuilt."
     fi
-    mkdir -p "${GAME_DATA_DIR}/${name}"
-    mirror_tree "${GAME_DIR}/left4dead2/${name}" "${GAME_DATA_DIR}/${name}"
-done
 
-for name in ${WRITABLE_SUBDIRS}; do
-    [ -d "${GAME_DIR}/left4dead2/${name}" ] || continue
-    target="${GAME_DATA_DIR}/${name}"
+    log "Downloading the Left 4 Dead 2 dedicated server (~10 GB, once per volume)."
+    log "  app ${APP_ID}"
+    log "  depot ${GAME_DEPOT} manifest ${GAME_MANIFEST}   the game"
+    log "  depot ${LAUNCHER_DEPOT} manifest ${LAUNCHER_MANIFEST}   srcds_run"
 
-    if [ -L "${target}" ]; then
-        rm -f "${target}"
-    fi
-    mkdir -p "${target}"
-    mirror_tree "${GAME_DIR}/left4dead2/${name}" "${target}"
-done
+    # The staging tree lives inside the volume on purpose: swapping it into
+    # place is then a rename per entry rather than a second 10 GB copy, and an
+    # interrupted download can never be mistaken for a finished one.
+    staging="${DATA_DIR}/.l4d2-install"
+    saved_cfg=""
+    rm -rf "${staging}" "${staging}-cfg"
+    mkdir -p "${staging}"
 
-for name in ${WRITABLE_GAME_FILES}; do
-    if [ -L "${GAME_DATA_DIR}/${name}" ]; then
-        rm -f "${GAME_DATA_DIR}/${name}"
-        cp "${GAME_DIR}/left4dead2/${name}" "${GAME_DATA_DIR}/${name}"
-    fi
-done
+    # One run per depot: DepotDownloader takes a single -depot, and the two
+    # write disjoint paths into the same staging tree. The launcher goes first
+    # because it is 674 files and finishes in seconds, which makes a broken pin
+    # fail fast instead of after ten minutes.
+    "${DEPOT_DOWNLOADER}" \
+        -app "${APP_ID}" \
+        -depot "${LAUNCHER_DEPOT}" \
+        -manifest "${LAUNCHER_MANIFEST}" \
+        -dir "${staging}" \
+        -max-downloads "${MAX_DOWNLOADS}"
 
-for name in ${WRITABLE_DATA_FILES}; do
-    if [ -L "${DATA_DIR}/${name}" ]; then
-        rm -f "${DATA_DIR}/${name}"
+    "${DEPOT_DOWNLOADER}" \
+        -app "${APP_ID}" \
+        -depot "${GAME_DEPOT}" \
+        -manifest "${GAME_MANIFEST}" \
+        -dir "${staging}" \
+        -max-downloads "${MAX_DOWNLOADS}"
+
+    # The tool drops its own .DepotDownloader bookkeeping - manifest copies and
+    # a staging area - into the install directory.
+    rm -rf "${staging}/.DepotDownloader"
+
+    if [ ! -x "${staging}/srcds_run" ] || [ ! -d "${staging}/left4dead2" ]; then
+        rm -rf "${staging}"
+        fail \
+            "The download reported success but did not produce a server in ${DATA_DIR}." \
+            "" \
+            "Expected srcds_run from depot ${LAUNCHER_DEPOT} and left4dead2/ from" \
+            "depot ${GAME_DEPOT}. Either a manifest id has stopped belonging to" \
+            "its depot, or Steam is no longer serving it - old manifests can be" \
+            "withdrawn, so a long-lived pin is not a permanent guarantee."
     fi
-    if [ ! -e "${DATA_DIR}/${name}" ]; then
-        : > "${DATA_DIR}/${name}"
+
+    # left4dead2/cfg is the operator's: the engine and SourceMod write into it
+    # and server_custom.cfg lives there. Park it beside the staging tree and
+    # put it back after the swap.
+    if [ -d "${INSTALL_DIR}/cfg" ]; then
+        saved_cfg="${staging}-cfg"
+        mv "${INSTALL_DIR}/cfg" "${saved_cfg}"
     fi
-done
+
+    shopt -s dotglob nullglob
+    for entry in "${staging}"/*; do
+        name="$(basename "${entry}")"
+        rm -rf "${DATA_DIR:?}/${name}"
+        mv "${entry}" "${DATA_DIR}/"
+    done
+    shopt -u dotglob nullglob
+    rmdir "${staging}"
+
+    if [ -n "${saved_cfg}" ]; then
+        rm -rf "${INSTALL_DIR}/cfg"
+        mv "${saved_cfg}" "${INSTALL_DIR}/cfg"
+    fi
+
+    printf '%s\n' "${WANTED_INSTALL}" > "${MANIFEST_STAMP}"
+    log "Install ready: ${WANTED_INSTALL}."
+fi
+
+# ---------------------------------------------------------------------------
+# Mod stack
+# ---------------------------------------------------------------------------
+#
+# The image stages our addons/ and cfg/ at OVERLAY_DIR, mirroring left4dead2/,
+# and they are applied on every start - not only after a download - so an image
+# update reaches a volume that already carries the right game build.
+#
+# addons/ is ours and is overwritten. cfg/ is the operator's and is copied
+# without clobbering, so a tuned sourcemod.cfg or l4dmultislots.cfg survives.
+# --no-preserve=ownership because the overlay is root-owned in the image and the
+# install is written by an unprivileged user.
+log "Applying the mod stack from ${OVERLAY_DIR}..."
+if [ -d "${OVERLAY_DIR}/left4dead2/addons" ]; then
+    mkdir -p "${INSTALL_DIR}/addons"
+    cp -a --no-preserve=ownership "${OVERLAY_DIR}/left4dead2/addons/." "${INSTALL_DIR}/addons/"
+fi
+if [ -d "${OVERLAY_DIR}/left4dead2/cfg" ]; then
+    mkdir -p "${INSTALL_DIR}/cfg"
+    cp -an --no-preserve=ownership "${OVERLAY_DIR}/left4dead2/cfg/." "${INSTALL_DIR}/cfg/" || true
+fi
 
 if [ ! -x "${DATA_DIR}/srcds_run" ]; then
     fail \
-        "${DATA_DIR}/srcds_run is missing or not executable after linking." \
+        "${DATA_DIR}/srcds_run is missing or not executable." \
         "" \
-        "Check that ${DATA_DIR} is a writable volume and that nothing in it" \
-        "shadows the image install."
+        "The install was just written to the volume, so this means ${DATA_DIR}" \
+        "is not the writable volume it was expected to be."
 fi
 
 # Ensure steamclient.so is linked to ~/.steam/sdk32 for Valve Steam API
 mkdir -p "${HOME}/.steam/sdk32"
 ln -sf "${DATA_DIR}/bin/steamclient.so" "${HOME}/.steam/sdk32/steamclient.so"
+
+# srcds writes its console here as well as to stdout; make sure it can create
+# the file before it decides to.
+[ -e "${DATA_DIR}/console.log" ] || : > "${DATA_DIR}/console.log"
 
 # ---------------------------------------------------------------------------
 # Configuration files
@@ -354,7 +414,7 @@ ln -sf "${DATA_DIR}/bin/steamclient.so" "${HOME}/.steam/sdk32/steamclient.so"
 # server_custom.cfg, whose contents are appended to the rendered server.cfg
 # and which is never overwritten.
 
-CFG_DIR="${GAME_DATA_DIR}/cfg"
+CFG_DIR="${INSTALL_DIR}/cfg"
 mkdir -p "${CFG_DIR}"
 
 CUSTOM_CFG="${CFG_DIR}/server_custom.cfg"

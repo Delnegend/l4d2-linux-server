@@ -19,8 +19,8 @@ what addresses the 4-survivor cap. Both ship in the published image.
 
 ## What the image does about it
 
-[Source](https://github.com/lakwsh/l4dtoolz) is l4dtoolz 2.5.1, baked into the
-image with three cvars in the image-level override layer
+[Source](https://github.com/lakwsh/l4dtoolz) is l4dtoolz 2.5.1, staged in the
+image's mod overlay with three cvars in the image-level override layer
 (`/defaults/server_custom.cfg`):
 
 ```cvar

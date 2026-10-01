@@ -1,21 +1,21 @@
 # syntax=docker/dockerfile:1.7
 #
-# Targets:
+# One published image, one stage, and none of Valve's 10 GB inside it.
 #
-#   fetch   one-shot DepotDownloader stage, never published
-#   base    vanilla dedicated server, downloaded at BUILD time and baked in, plus
-#           the 32-bit runtime libraries. Never published: it exists so the
-#           image below is provably layered on an unmodified install, and so
-#           that rebuilding after a change to the entrypoint or the config
-#           template hits the build cache instead of re-downloading 10 GB.
-#   server  the published image: base + MetaMod:Source + SourceMod + l4dtoolz,
-#           the entrypoint, the config template, and the image-level cvars.
-#           This is the last stage, so a bare `podman build .` produces it.
+# The game install is downloaded on the first start of a volume from a pinned
+# Steam depot manifest, and reused on every start after that. What this image
+# carries is what is ours: the 32-bit runtime libraries, DepotDownloader (which
+# has to ship now that it runs at start-up), the mod stack, the entrypoint and
+# the config template.
+#
+# The mod stack is staged as a tree at /opt/l4d2-overlay that mirrors the
+# install layout, and the entrypoint copies it over the downloaded install on
+# every start. Staging it rather than writing straight into an install is what
+# lets the install be replaced wholesale when Valve ships a new build without
+# losing the mod stack - and it means addons/ and cfg/ are merged with
+# different rules, because one of them belongs to us and the other to you.
 #
 #   just build          # or: podman build -t l4d2:dev .
-#
-# The ~10 GB game payload is downloaded once, in the `fetch` stage, so the
-# downloader never ends up inside a published image.
 #
 # Docs: docs/architecture.md, docs/configuration.md, docs/eight-players.md,
 #       docs/troubleshooting.md, docs/maintenance.md
@@ -23,90 +23,48 @@
 ARG DEBIAN_IMAGE=debian:trixie-slim
 ARG SERVER_VERSION=dev
 
-# ===========================================================================
-# fetch - one-shot downloader stage, never published
-# ===========================================================================
-FROM ${DEBIAN_IMAGE} AS fetch
-
-ARG DEPOT_DOWNLOADER_VERSION=3.4.0
-ARG APP_ID=222860
-# DepotDownloader splits each depot manifest into chunks and downloads
-# `-max-downloads` of them concurrently. 8 is the tool's own default and
-# saturates a normal uplink; raise it for a fat pipe.
-ARG MAX_DOWNLOADS=16
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl unzip && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /opt/depotdownloader /opt/l4d2 && \
-    curl -sSL "https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_${DEPOT_DOWNLOADER_VERSION}/DepotDownloader-linux-x64.zip" -o /tmp/dd.zip && \
-    unzip -q /tmp/dd.zip -d /opt/depotdownloader && \
-    chmod +x /opt/depotdownloader/DepotDownloader && \
-    rm -f /tmp/dd.zip
-
-# Anonymous login, dedicated-server subscription, linux depot set.
-#
-# The tool drops its `.DepotDownloader` bookkeeping - manifest copies and a
-# staging area - into the install directory, so it is removed afterwards: the
-# published image carries game files and nothing else.
-WORKDIR /opt
-RUN /opt/depotdownloader/DepotDownloader \
-        -app "${APP_ID}" \
-        -os linux \
-        -dir /opt/l4d2 \
-        -max-downloads "${MAX_DOWNLOADS}" && \
-    rm -rf /opt/l4d2/.DepotDownloader
-
-# ===========================================================================
-# base - the published vanilla server
-# ===========================================================================
-FROM ${DEBIAN_IMAGE} AS base
+FROM ${DEBIAN_IMAGE} AS server
 
 ARG SERVER_VERSION
 
 LABEL maintainer="Homelab Admin"
-LABEL description="Left 4 Dead 2 Dedicated Server, game files baked in at build time (no customizations)"
+LABEL description="Left 4 Dead 2 Dedicated Server with SourceMod/MetaMod, l4dtoolz and templated configuration, 8 player slots"
 LABEL org.opencontainers.image.version="${SERVER_VERSION}"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install 32-bit runtime dependencies for Source Engine
-RUN dpkg --add-architecture i386 && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        lib32gcc-s1 \
-        lib32stdc++6 \
-        libc6:i386 \
-        libcurl4-gnutls-dev:i386 \
-        locales \
-    && rm -rf /var/lib/apt/lists/*
+# ---------------------------------------------------------------------------
+# The pin: where the game comes from
+# ---------------------------------------------------------------------------
+#
+# The install spans two Steam depots of app 222860, and each carries its own
+# manifest id: the game itself (222861) and the launcher depot that provides
+# srcds_run and srcds_linux (222863). DepotDownloader takes one -depot per run
+# and the two are versioned independently - the game depot has not moved since
+# 2024, the launcher depot moves far more often - so pinning only the game
+# would leave the server binary itself unpinned.
+#
+# A manifest id, not a build number: two runs that resolve to the same value
+# fetch byte-identical files, and a different value is the only thing that makes
+# the entrypoint download again. These are ARGs rather than constants so an
+# operator can move a deployment to a new Valve build from .env, without
+# waiting for - or even pulling - a new image.
+ARG APP_ID=222860
+# 222861 is the linux dedicated server: 116 977 files, ~9.5 GB. 222863 is 674
+# files, the launcher. The SDK depot is not selected: -os linux never picks it.
+ARG GAME_DEPOT=222861
+ARG GAME_MANIFEST=4827977561765481436
+ARG LAUNCHER_DEPOT=222863
+ARG LAUNCHER_MANIFEST=868244163643826330
 
-# The steam user is created *before* the install lands, so the COPY can set the
-# ownership itself. A `chown -R` afterwards would restamp all 20 GB of metadata
-# and copy the entire tree into a second 10 GB layer.
-RUN useradd -m -u 1000 -s /bin/bash steam && \
-    mkdir -p /data
-
-COPY --from=fetch --chown=steam:steam /opt/l4d2 /opt/l4d2
-
-USER steam
-WORKDIR /data
-
-EXPOSE 27015/tcp 27015/udp 26901/udp
-
-# ===========================================================================
-# server - the published image
-# ===========================================================================
-FROM base AS server
-
-ARG SERVER_VERSION
-
-LABEL description="Left 4 Dead 2 Dedicated Server with SourceMod/MetaMod, l4dtoolz and templated configuration, 8 player slots"
-LABEL org.opencontainers.image.version="${SERVER_VERSION}"
+# DepotDownloader ships in the published image now - the download it performs
+# is the entrypoint's first job, not the build's. That is the price of not
+# baking the install in, and it is why the old one-shot `fetch` stage is gone.
+ARG DEPOT_DOWNLOADER_VERSION=3.4.0
+# DepotDownloader splits each depot manifest into chunks and downloads
+# `-max-downloads` of them concurrently. 8 is the tool's own default and
+# saturates a normal uplink; raise it for a fat pipe.
+ARG MAX_DOWNLOADS=16
 
 # AlliedModders release branch for BOTH MetaMod:Source and SourceMod. 1.12 is
 # sourcemod.net's *stable* channel (its dev channel is 1.13, and the 1.11 line
@@ -115,38 +73,88 @@ LABEL org.opencontainers.image.version="${SERVER_VERSION}"
 # "unsupported feature set; code is too new".
 ARG SOURCEMOD_BRANCH=1.12
 
-USER root
+# Everything the entrypoint needs at run time, as environment variables: the
+# pins and the downloader's limits are build arguments for readability, but
+# they have to reach the start-up code that uses them.
+ENV APP_ID=${APP_ID} \
+    GAME_DEPOT=${GAME_DEPOT} \
+    GAME_MANIFEST=${GAME_MANIFEST} \
+    LAUNCHER_DEPOT=${LAUNCHER_DEPOT} \
+    LAUNCHER_MANIFEST=${LAUNCHER_MANIFEST} \
+    MAX_DOWNLOADS=${MAX_DOWNLOADS} \
+    DEPOT_DOWNLOADER=/opt/depotdownloader/DepotDownloader
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl tar unzip && \
-    rm -rf /var/lib/apt/lists/*
+# The staged mod stack. Mirrors left4dead2/ so the entrypoint can copy
+# `addons/` and `cfg/` with separate rules.
+ENV OVERLAY_DIR=/opt/l4d2-overlay
 
-# MetaMod:Source + SourceMod, baked into the image copy of the game tree.
-# /tmp is used rather than the install dir so the archives cannot be mistaken
-# for game content.
+# ---------------------------------------------------------------------------
+# Runtime libraries and tools
+# ---------------------------------------------------------------------------
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        lib32gcc-s1 \
+        lib32stdc++6 \
+        libc6:i386 \
+        libcurl4-gnutls-dev:i386 \
+        locales \
+        tar \
+        unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# The steam user exists so the downloaded install has an owner that is not root.
+# The volume is bind-mounted and keeps whatever ids the host has; the entrypoint
+# runs as this user either way.
+RUN useradd -m -u 1000 -s /bin/bash steam
+
 RUN set -eux; \
-    cd /tmp; \
-    mm="$(curl -sSL "https://mms.alliedmods.net/mmsdrop/${SOURCEMOD_BRANCH}/mmsource-latest-linux")"; \
-    curl -sSL "https://mms.alliedmods.net/mmsdrop/${SOURCEMOD_BRANCH}/${mm}" -o mmsource.tar.gz; \
-    sm="$(curl -sSL "https://sm.alliedmods.net/smdrop/${SOURCEMOD_BRANCH}/sourcemod-latest-linux")"; \
-    curl -sSL "https://sm.alliedmods.net/smdrop/${SOURCEMOD_BRANCH}/${sm}" -o sourcemod.tar.gz; \
-    tar -xzf mmsource.tar.gz -C /opt/l4d2/left4dead2; \
-    tar -xzf sourcemod.tar.gz -C /opt/l4d2/left4dead2; \
-    rm -f mmsource.tar.gz sourcemod.tar.gz; \
-    # nextmap.smx vetoes the L4D2 nextmap cycle and breaks campaign rotation
-    mkdir -p /opt/l4d2/left4dead2/addons/sourcemod/plugins/disabled; \
-    mv -f /opt/l4d2/left4dead2/addons/sourcemod/plugins/nextmap.smx \
-          /opt/l4d2/left4dead2/addons/sourcemod/plugins/disabled/; \
-    # 64-bit metamod binaries only produce ELFCLASS64 dlopen warnings in 32-bit srcds
-    rm -rf /opt/l4d2/left4dead2/addons/metamod/bin/linux64; \
-    # Only what the archives touched needs an owner: base already handed the
-    # install to steam, and re-stamping all 10 GB here would duplicate it into
-    # a second layer. The tarballs carry a `cfg/` entry of their own, so
-    # extracting as root hands that one directory back to root - fix it by
-    # name rather than recursing.
-    chown -R steam:steam /opt/l4d2/left4dead2/addons; \
-    chown steam:steam /opt/l4d2/left4dead2/cfg
+    mkdir -p /opt/depotdownloader /opt/l4d2-overlay/left4dead2/addons /opt/l4d2-overlay/left4dead2/cfg; \
+    curl -fsSL "https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_${DEPOT_DOWNLOADER_VERSION}/DepotDownloader-linux-x64.zip" -o /tmp/dd.zip; \
+    unzip -q /tmp/dd.zip -d /opt/depotdownloader; \
+    chmod +x /opt/depotdownloader/DepotDownloader; \
+    rm -f /tmp/dd.zip
 
+# ---------------------------------------------------------------------------
+# MetaMod:Source + SourceMod
+# ---------------------------------------------------------------------------
+#
+# Both are resolved to the newest build on SOURCEMOD_BRANCH, so a rebuild picks
+# up whatever AlliedModders published - there is nothing to bump for them.
+RUN set -eux; \
+    ovl=/opt/l4d2-overlay/left4dead2; \
+    cd /tmp; \
+    mm="$(curl -fsSL "https://mms.alliedmods.net/mmsdrop/${SOURCEMOD_BRANCH}/mmsource-latest-linux")"; \
+    curl -fsSL "https://mms.alliedmods.net/mmsdrop/${SOURCEMOD_BRANCH}/${mm}" -o mmsource.tar.gz; \
+    sm="$(curl -fsSL "https://sm.alliedmods.net/smdrop/${SOURCEMOD_BRANCH}/sourcemod-latest-linux")"; \
+    curl -fsSL "https://sm.alliedmods.net/smdrop/${SOURCEMOD_BRANCH}/${sm}" -o sourcemod.tar.gz; \
+    # Both tarballs are rooted at addons/ - there is no component to strip.
+    # Extract to the side and copy the contents in, so the merge into the
+    # overlay cannot depend on which tarball was unpacked first.
+    mkdir -p mm sm; \
+    tar -xzf mmsource.tar.gz -C mm; \
+    tar -xzf sourcemod.tar.gz -C sm; \
+    cp -a mm/addons/. "${ovl}/addons/"; \
+    cp -a sm/addons/. "${ovl}/addons/"; \
+    rm -rf mm mmsource.tar.gz; \
+    # SourceMod ships three cfg/sourcemod files. They are seeded, not forced:
+    # the entrypoint copies cfg/ with no-clobber, so a server that has tuned
+    # sourcemod.cfg keeps its own.
+    cp -a sm/cfg/. "${ovl}/cfg/"; \
+    rm -rf sm sourcemod.tar.gz; \
+    # nextmap.smx vetoes the L4D2 nextmap cycle and breaks campaign rotation
+    mkdir -p "${ovl}/addons/sourcemod/plugins/disabled"; \
+    mv -f "${ovl}/addons/sourcemod/plugins/nextmap.smx" \
+          "${ovl}/addons/sourcemod/plugins/disabled/"; \
+    # 64-bit metamod binaries only produce ELFCLASS64 dlopen warnings in 32-bit srcds
+    rm -rf "${ovl}/addons/metamod/bin/linux64"
+
+# ---------------------------------------------------------------------------
+# l4dtoolz
+# ---------------------------------------------------------------------------
+#
 # l4dtoolz lifts L4D2's 4-survivor cap on co-op campaigns, which has nothing to
 # do with `+maxplayers`: the engine hard-codes 18 client slots and overwrites
 # that cvar regardless, while the campaign cap of 4 comes from the Steam lobby
@@ -158,12 +166,11 @@ ARG L4DTOOLZ_VERSION=2.5.1
 ARG L4DTOOLZ_BUILD=2155
 
 RUN set -eux; \
-    curl -sSL "https://github.com/lakwsh/l4dtoolz/releases/download/${L4DTOOLZ_VERSION}/l4dtoolz-${L4DTOOLZ_VERSION}-${L4DTOOLZ_BUILD}.zip" -o /tmp/l4dtoolz.zip; \
+    ovl=/opt/l4d2-overlay/left4dead2; \
+    curl -fsSL "https://github.com/lakwsh/l4dtoolz/releases/download/${L4DTOOLZ_VERSION}/l4dtoolz-${L4DTOOLZ_VERSION}-${L4DTOOLZ_BUILD}.zip" -o /tmp/l4dtoolz.zip; \
     unzip -q /tmp/l4dtoolz.zip -d /tmp/l4dtoolz; \
-    install -o steam -g steam -m 0644 /tmp/l4dtoolz/l4dtoolz.so \
-        /opt/l4d2/left4dead2/addons/l4dtoolz.so; \
-    install -o steam -g steam -m 0644 /tmp/l4dtoolz/l4dtoolz.vdf \
-        /opt/l4d2/left4dead2/addons/l4dtoolz.vdf; \
+    install -m 0644 /tmp/l4dtoolz/l4dtoolz.so "${ovl}/addons/l4dtoolz.so"; \
+    install -m 0644 /tmp/l4dtoolz/l4dtoolz.vdf "${ovl}/addons/l4dtoolz.vdf"; \
     rm -rf /tmp/l4dtoolz /tmp/l4dtoolz.zip
 
 # ---------------------------------------------------------------------------
@@ -187,7 +194,8 @@ ARG L4D_PLUGINS_REPO=https://raw.githubusercontent.com/fbef0102/L4D1_2-Plugins
 COPY assets/left4dhooks.zip /tmp/left4dhooks.zip
 
 RUN set -eux; \
-    sm=/opt/l4d2/left4dead2/addons/sourcemod; \
+    ovl=/opt/l4d2-overlay/left4dead2; \
+    sm="${ovl}/addons/sourcemod"; \
     echo "${LEFT4DHOOKS_SHA256}  /tmp/left4dhooks.zip" | sha256sum -c -; \
     unzip -q /tmp/left4dhooks.zip -d /tmp; \
     # the archive holds a `sourcemod/` tree and addons/ is where it belongs
@@ -208,27 +216,31 @@ RUN set -eux; \
 # l4dmultislots is compiled against the Multi-Colors include, and SourceMod
 # decides a library is present by finding its .inc on disk at load time.
 RUN set -eux; \
+    sm=/opt/l4d2-overlay/left4dead2/addons/sourcemod; \
     curl -fsSL -o /tmp/mc.zip \
         "https://github.com/fbef0102/L4D1_2-Plugins/releases/download/Multi-Colors/multicolors.zip"; \
     unzip -q /tmp/mc.zip -d /tmp/mc; \
-    cp -r /tmp/mc/scripting/include/. \
-        /opt/l4d2/left4dead2/addons/sourcemod/scripting/include/; \
-    rm -rf /tmp/mc /tmp/mc.zip; \
-    chown -R steam:steam /opt/l4d2/left4dead2/addons; \
-    chown steam:steam /opt/l4d2/left4dead2/cfg
+    cp -r /tmp/mc/scripting/include/. "${sm}/scripting/include/"; \
+    rm -rf /tmp/mc /tmp/mc.zip
 
-# Ship the two cvars that make it a 5+ server out of the box. See
-# docs/eight-players.md for how to change them on the volume.
-COPY --chown=steam:steam l4dmultislots.cfg /opt/l4d2/left4dead2/cfg/sourcemod/l4dmultislots.cfg
+# Ship the cvar that turns the spare slots into survivors. It is copied with
+# no-clobber like the rest of cfg/, so an operator who has tuned it keeps their
+# value.
+COPY l4dmultislots.cfg /opt/l4d2-overlay/left4dead2/cfg/sourcemod/l4dmultislots.cfg
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
-COPY --chown=steam:steam server_custom.cfg /defaults/server_custom.cfg
+COPY server_custom.cfg /defaults/server_custom.cfg
 
-COPY --chown=steam:steam entrypoint.sh /entrypoint.sh
-COPY --chown=steam:steam server.cfg.template /defaults/server.cfg.template
+COPY entrypoint.sh /entrypoint.sh
+COPY server.cfg.template /defaults/server.cfg.template
 RUN chmod +x /entrypoint.sh
 
 USER steam
 WORKDIR /data
+
+EXPOSE 27015/tcp 27015/udp 26901/udp
 
 ENTRYPOINT ["/entrypoint.sh"]

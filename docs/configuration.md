@@ -11,6 +11,7 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 
 | Variable | Default | Renders / does |
 |---|---|---|
+| `GAME_MANIFEST` | the image's `ARG` | Steam depot manifest id to install. Empty takes the one baked into the image. Setting it makes the next start of the volume download that build instead — see [maintenance.md](maintenance.md#updating-the-game). |
 | `PORT` | `27015` | `-port` |
 | `STEAM_PORT` | `26901` | `-sport` |
 | `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
@@ -31,11 +32,10 @@ matters is in [eight-players.md](eight-players.md).
 > the password prompt hangs when `sv_allow_lobby_connect_only` is `0`, which is
 > what the template sets. The entrypoint logs a note when it is non-empty.
 
-One knob is deliberately absent from `.env.example`: `GAME_DIR` (default
-`/opt/l4d2`) tells the entrypoint where the image's install lives. It only
-matters if you build a custom image that puts the install somewhere else, and
-pointing it at a wrong path makes the entrypoint refuse to start rather than
-download anything.
+`GAME_MANIFEST` is the one knob that changes what is on disk rather than how
+the server behaves. It deliberately has no default of its own: an empty `.env`
+leaves the image's value in force, so a compose file that never mentions it
+still gets a working server.
 
 ## Config file precedence
 
@@ -92,19 +92,18 @@ command line, unlike in a config file, where it stays quiet.
 
 | Content | Path | Kind |
 |---|---|---|
-| Custom map (`.vpk`) | `data/left4dead2/maps/` | real directory, contents linked |
+| Custom map (`.vpk`) | `data/left4dead2/maps/` | real directory on the volume |
 | Custom campaign | `data/left4dead2/scripts/` for the `.txt`, `maps/` for the VPKs | real directory |
-| Campaign rotation | `data/left4dead2/mapcycle.txt` | real file, not a link |
+| Campaign rotation | `data/left4dead2/mapcycle.txt` | real file |
 
-These are real directories, so dropped-in files sit next to the linked stock
-content rather than replacing it.
+All of it is real files on the volume, dropped-in content sitting beside the
+stock content rather than replacing it.
 
 ## SourceMod and MetaMod
 
-`data/left4dead2/addons/sourcemod` and `.../metamod` are **links into the
-image** — deliberately, so mods are versioned with the image rather than with
-whatever happened to be on the volume. That means editing inside them is lost
-on restart, and installing a plugin needs one deliberate step first.
+`data/left4dead2/addons/sourcemod` and `.../metamod` are **overwritten on every
+start** from the overlay the image carries, so a plugin installed straight into
+them is lost on restart. Installing a plugin needs one deliberate step first.
 
 How to add a plugin, a MetaMod extension, or a custom map — and when a mod
 belongs in the image rather than on the volume — is in
@@ -115,5 +114,5 @@ belongs in the image rather than on the volume — is in
 | Thing | Why |
 |---|---|
 | Player count | The engine hard-codes MaxClients at 18 and overwrites `maxplayers` on startup. See [eight-players.md](eight-players.md). |
-| Game files | Downloaded at build time and baked in. There is no runtime downloader and no `AUTO_UPDATE`; see [maintenance.md](maintenance.md). |
-| Mod versions | Baked per image tag. |
+| Game files | Downloaded on the first start of a volume from `GAME_MANIFEST`, then left alone. See [maintenance.md](maintenance.md). |
+| Mod versions | Baked per image tag, applied on every start. |

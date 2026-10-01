@@ -26,7 +26,11 @@ services:
       - SV_CONSISTENCY=${SV_CONSISTENCY:-0}
       - SV_PURE=${SV_PURE:-0}
       - EXTRA_ARGS=${EXTRA_ARGS:-}
+      # GAME_MANIFEST is deliberately absent here: an empty interpolation
+      # default would override the value the image bakes in and leave the
+      # entrypoint with no manifest at all. The image's ARG is the default and
+      # the .env file above is the override.
     volumes:
-      # Only the writable state lives here. The game install is baked into the
-      # image at /opt/l4d2 and linked in at start-up.
+      # Everything lives here: the ~10 GB install the entrypoint downloads on
+      # the first start, plus the configuration and logs it writes.
       - ./data:/data

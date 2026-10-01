@@ -18,78 +18,52 @@ a SourceMod plugin, a MetaMod extension, or map/campaign content.
 
 ## The rule that governs everything
 
-The image keeps the 20 GB install at `/opt/l4d2` and links it into the volume
-at `/data`, so the server can keep using `/data` as its working directory. Only
-these are **real directories** on the volume; everything else is a symlink into
-the image:
+`addons/` belongs to the image. On every start the entrypoint copies the
+overlay it carries at `/opt/l4d2-overlay` over
+`data/left4dead2/addons/`, overwriting what is there:
 
 ```text
-data/left4dead2/cfg/            real, contents linked
-data/left4dead2/cfg/sourcemod/  real, contents linked
-data/left4dead2/addons/         real, contents linked
-data/left4dead2/maps/           real, contents linked
-data/left4dead2/scripts/        real, contents linked
+data/left4dead2/addons/         overwritten every start from the image
+data/left4dead2/cfg/            yours - seeded from the image, never overwritten
+data/left4dead2/maps/           yours
+data/left4dead2/scripts/        yours
 ```
 
 So:
 
-- **A new file in one of those directories sticks.** It lands as a real file
-  and survives restarts. Verified.
-- **Writing to a path that is already a symlink does not stick.** The write goes
-  into the container's own filesystem, and is gone when the container is
-  recreated. This is the single most common way to lose a mod.
+- **A file in `cfg/`, `maps/` or `scripts/` sticks.** Real files on the volume,
+  surviving restarts. Verified.
+- **A file in `addons/` does not stick.** It is replaced on the next start.
 
-Check before you write anything:
+There is no symlink anywhere to check for first — `ls -ld` on any of these paths
+shows a real directory. What decides the outcome is which directory it is.
 
-```bash
-ls -l data/left4dead2/addons/sourcemod     # link or real directory?
-```
+`cfg/` is seeded with no-clobber rather than overwritten, because
+`server_custom.cfg`, `sourcemod.cfg` and `l4dmultislots.cfg` are yours to tune.
 
 ---
 
 ## SourceMod plugins (`.smx`)
 
-### On the volume
-
-`data/left4dead2/addons/sourcemod` is a **symlink to the image**, so a plugin
-dropped inside it disappears. Replace the link with a real copy once:
-
-```bash
-podman compose exec l4d2 sh -c \
-  'rm -f /data/left4dead2/addons/sourcemod && cp -r /opt/l4d2/left4dead2/addons/sourcemod /data/left4dead2/addons/'
-
-podman compose cp ./myplugin.smx l4d2:/data/left4dead2/addons/sourcemod/plugins/
-podman compose restart l4d2
-```
-
-After that the directory is a real one and the farm leaves it alone: plugins
-you add persist across restarts.
-
-Two things to know about this copy:
-
-- It is a **snapshot**. Plugins the image ships in a later release will not
-  appear in your copy until you redo it. If you are chasing an update, bake the
-  mod instead.
-- `podman compose exec ... rm -f` on a *real* directory deletes it. The `rm -f`
-  is deliberate: it removes a link and fails loudly rather than deleting a real
-  tree if you run it twice.
-
 ### Baked into the image
 
 The right answer for anything that should be on every server, and the only way
-to get a plugin that needs a build step. In the `server` stage, after
-SourceMod is installed:
+to get a plugin that needs a build step. The overlay is staged at
+`/opt/l4d2-overlay/left4dead2`, so a plugin lands there rather than in an
+install:
 
 ```dockerfile
 ARG MYPLUGIN_REF=<commit-sha>
 RUN set -eux; \
-    plugins=/opt/l4d2/left4dead2/addons/sourcemod/plugins; \
+    plugins=/opt/l4d2-overlay/left4dead2/addons/sourcemod/plugins; \
     curl -fsSL -o /tmp/p.smx \
         "https://raw.githubusercontent.com/owner/repo/${MYPLUGIN_REF}/build/myplugin.smx"; \
-    install -o steam -g steam -m 0644 /tmp/p.smx "${plugins}/myplugin.smx"; \
-    rm -f /tmp/p.smx; \
-    chown -R steam:steam /opt/l4d2/left4dead2/addons
+    install -m 0644 /tmp/p.smx "${plugins}/myplugin.smx"; \
+    rm -f /tmp/p.smx
 ```
+
+No `chown` is needed: the entrypoint copies the overlay as an unprivileged user
+and `--no-preserve=ownership` makes that work.
 
 Pin it to a commit, not a branch, so a rebuild gets the same bytes. A `.smx`
 that is fetched from a forum attachment rather than a package feed has no such
@@ -133,8 +107,9 @@ makes the engine load it**:
 }
 ```
 
-`data/left4dead2/addons/` is a real directory, so dropping both files straight
-in works and they persist:
+`data/left4dead2/addons/` is overwritten from the image on every start, so
+dropping both files straight in does **not** persist. Bake them into the
+overlay instead:
 
 ```bash
 podman compose cp ./mytoolz.so l4d2:/data/left4dead2/addons/
@@ -159,7 +134,8 @@ MetaMod's `linux64/` module — that is the source of the harmless
 | Campaign `.txt` definition | `data/left4dead2/scripts/` |
 | Campaign VPKs | `data/left4dead2/maps/` |
 
-Both directories are real, so files land next to the linked stock content.
+Both directories are real and untouched by the overlay, so files land next to
+the stock content.
 
 Two cvars matter for custom content, and the image already sets both:
 
@@ -186,8 +162,8 @@ load.
 podman compose logs l4d2 | grep -E '\[SM\]'      # empty = everything loaded
 ```
 
-`just smoke-plugins` automates exactly that against a freshly built image, and
-also reports how many of the expected plugins are present.
+`just smoke` automates exactly that against a freshly built image, and also
+reports how many of the expected plugins are present.
 
 From a connected client, the in-game console is the other view — `sm plugins`
 lists what SourceMod loaded, `meta list` what MetaMod has. Those are the
@@ -204,20 +180,25 @@ and does nothing is usually a cvar in its own config file that never got set.
 Adding a plugin to one server only, and not to the image:
 
 ```bash
-# 1. is the path a symlink? (it is, until you do this)
-podman compose exec l4d2 ls -ld /data/left4dead2/addons/sourcemod
-
-# 2. make it real, once
-podman compose exec l4d2 sh -c \
-  'rm -f /data/left4dead2/addons/sourcemod && cp -r /opt/l4d2/left4dead2/addons/sourcemod /data/left4dead2/addons/'
-
-# 3. install the plugin and anything it needs
+# 1. install the plugin and anything it needs
 podman compose cp ./myplugin.smx          l4d2:/data/left4dead2/addons/sourcemod/plugins/
 podman compose cp ./myplugin_gamedata.txt l4d2:/data/left4dead2/addons/sourcemod/gamedata/
 
-# 4. restart and read the log
+# 2. restart and read the log
 podman compose restart l4d2
 podman compose logs l4d2 | grep -E '\[SM\]'      # empty = good
+```
+
+That works until the next restart, because `addons/` comes from the image. To
+make it stick, either stage it in the overlay as above, or have the server load
+it from a directory the overlay does not touch:
+
+```bash
+podman compose exec l4d2 mkdir -p /data/left4dead2/mods/mine
+podman compose cp ./myplugin.smx l4d2:/data/left4dead2/mods/mine/
+podman compose exec l4d2 sh -c \
+  'echo "sm plugins load /data/left4dead2/mods/mine/myplugin.smx" >> /data/left4dead2/cfg/server_custom.cfg'
+podman compose restart l4d2
 ```
 
 Decide afterwards whether it earned a place in the image: if every server should

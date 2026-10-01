@@ -83,23 +83,29 @@ Lines that matter:
 | `Self-check OK: server answers A2S queries` | The server is discoverable. |
 | `SELF-CHECK FAILED` | Running but answering nothing. |
 | `[Bootstrap] WARNING: …/server.cfg differs from the rendered template` | Your hand-edits to `server.cfg` are about to be discarded. Move them to `server_custom.cfg`. |
-| `exec: couldn't exec …` | An `exec` line in a config file. The engine resolves those against the image, not the volume — see [architecture.md](architecture.md#one-engine-quirk-worth-knowing). |
+| `exec: couldn't exec …` | An `exec` line in a config file. The engine resolves those against the install root on the volume — see [architecture.md](architecture.md#one-engine-quirk-worth-knowing). |
 | `[SM] Unable to load plugin "X": Could not find required plugin "left4dhooks"` | Expected until DHooks is added. See [eight-players.md](eight-players.md). |
 | `[SM] Unable to load plugin "X": unsupported feature set; code is too new` | The plugin is compiled against a newer SourceMod than this image ships. Check `SOURCEMOD_BRANCH`. |
 
 ## The volume is not what you expect
 
-`data/` is only ~1 MB, and that is correct: the install is in the image. What you
-are looking at is mostly symlinks into `/opt/l4d2`.
+`data/` is about 11 GB, and that is correct: the install is on the volume. It
+was downloaded on the first start and is reused from then on.
 
 ```bash
-ls -l data/left4dead2/            # -> entries point into the image
-ls -l data/left4dead2/cfg/        # real files written by the server
+du -sh data/
+cat data/left4dead2/.l4d2-manifest   # the depot manifests this install came from
 ```
 
-If a path you expect is missing, check whether the container can write to the
-volume at all — the entrypoint fails loudly with `srcds_run is missing or not
-executable after linking` if it cannot.
+If the volume is much smaller than that, the download did not finish. Watch it
+with `just logs`; the entrypoint logs the two depots and their manifests before
+it starts, and prints `Install ready:` only once both are in place.
+
+If `data/` is empty and the log shows a download starting on every restart, the
+entrypoint is replacing the install each time — which it only does when
+`.l4d2-manifest` does not match `GAME_MANIFEST`. The usual cause is
+`GAME_MANIFEST` set differently on two starts; see
+[maintenance.md](maintenance.md#updating-the-game).
 
 ## Players cannot see more than four slots
 

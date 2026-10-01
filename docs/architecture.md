@@ -122,7 +122,7 @@ one. The tool's `.DepotDownloader/` bookkeeping is removed before the swap.
 | `SOURCEMOD_BRANCH` | `1.12` | AlliedModders release branch for **both** MetaMod:Source and SourceMod. |
 | `L4DTOOLZ_VERSION` / `L4DTOOLZ_BUILD` | `2.5.1` / `2155` | Which l4dtoolz release goes into the overlay. |
 | `LEFT4DHOOKS_SHA256` | `1536aac3…` | Checksum the vendored `assets/left4dhooks.zip` against. The build fails if it does not match. |
-| `L4D_PLUGINS_REF` | `3494e478…` | Commit of [fbef0102/L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins) the 5+ plugins are fetched from, so a rebuild gets the same bytes. |
+| `L4D_PLUGINS_REF` | `dd1e1394…` | Commit of [fbef0102/L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins) the 5+ plugins are fetched from, so a rebuild gets the same bytes. |
 | `DEPOT_DOWNLOADER_VERSION` | `3.4.0` | DepotDownloader release to ship in the image. |
 | `SERVER_VERSION` | `dev` | Stamped as `org.opencontainers.image.version`. |
 | `DEBIAN_IMAGE` | `debian:trixie-slim` | Base distribution. |

@@ -17,7 +17,7 @@ graph TD
 |---|---|---|
 | `fetch` | no target | DepotDownloader plus the download. Anonymous login, linux depot set. Exists so the downloader never enters a published image. |
 | `base` | no, build stage only | The 32-bit runtime libraries and the install, byte for byte as DepotDownloader wrote it. No entrypoint, no configuration, no mods. |
-| `server` | **yes** | `base` plus MetaMod:Source + SourceMod (1.12), l4dtoolz, the entrypoint, `server.cfg.template` and the image-level cvars. |
+| `server` | **yes** | `base` plus MetaMod:Source + SourceMod (1.12), l4dtoolz, Left 4 DHooks, the 5+ survivor plugins, the entrypoint, `server.cfg.template` and the image-level cvars. |
 
 `server` is the last stage, so `podman build .` produces it with no `--target`.
 
@@ -100,6 +100,8 @@ not into the working directory, so the fetch stage removes it explicitly.
 | `MAX_DOWNLOADS` | `16` | Concurrent depot chunks. Higher saturates a faster uplink. |
 | `SOURCEMOD_BRANCH` | `1.12` | AlliedModders release branch for **both** MetaMod:Source and SourceMod. |
 | `L4DTOOLZ_VERSION` / `L4DTOOLZ_BUILD` | `2.5.1` / `2155` | Which l4dtoolz release is baked in. |
+| `LEFT4DHOOKS_SHA256` | `1536aac3…` | Checksum the vendored `assets/left4dhooks.zip` against. The build fails if it does not match. |
+| `L4D_PLUGINS_REF` | `3494e478…` | Commit of [fbef0102/L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins) the 5+ plugins are fetched from, so a rebuild gets the same bytes. |
 | `SERVER_VERSION` | `dev` | Stamped as `org.opencontainers.image.version`. |
 | `DEBIAN_IMAGE` | `debian:trixie-slim` | Base distribution. |
 
@@ -144,9 +146,10 @@ volume** against a 10 GB image.
   volume.
 - **Writes never go through a link.** The writable set is explicit, because a
   write through a symlink lands in the container filesystem and is lost on the
-  next restart: directories `left4dead2/{cfg,addons,maps,scripts}` plus the
-  files `motd.txt`, `mapcycle.txt`, `missioncycle.txt`, `maplist.txt` and
-  `console.log`.
+  next restart: directories `left4dead2/{cfg,addons,maps,scripts}`, the nested
+  `left4dead2/cfg/sourcemod` (SourceMod writes every generated plugin config
+  there), plus the files `motd.txt`, `mapcycle.txt`, `missioncycle.txt`,
+  `maplist.txt` and `console.log`.
 
 ### Upgrading from a pre-split image
 

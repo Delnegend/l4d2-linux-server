@@ -31,6 +31,21 @@ legacy branch kept for people who need it. The 5+/8-player plugins are compiled
 against 1.12, so a 1.11 build is the one combination that is both unsupported and
 less functional ([eight-players.md](eight-players.md)).
 
+## Updating the 5+ plugins
+
+Three of the four come from [fbef0102/L4D1_2-Plugins](https://github.com/fbef0102/L4D1_2-Plugins)
+and are pinned to a commit, `L4D_PLUGINS_REF`. Bump it and rebuild:
+
+```bash
+podman build --build-arg L4D_PLUGINS_REF=<sha> -t localhost/l4d2:dev .
+```
+
+`left4dhooks` is different: it is a forum attachment, not a package, so it is
+vendored at `assets/left4dhooks.zip` and verified against
+`LEFT4DHOOKS_SHA256`. Replacing it is a manual two-step — drop the new archive
+in, update the checksum in the Dockerfile — which the build enforces rather
+than trusting.
+
 ## Updating l4dtoolz
 
 ```bash

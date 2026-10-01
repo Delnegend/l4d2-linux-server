@@ -103,6 +103,7 @@ co-op campaign to four survivors is something else entirely — see
 | [docs/architecture.md](docs/architecture.md) | You want to know how the image is layered, how `/data` is joined to it, or what a build argument does. |
 | [docs/configuration.md](docs/configuration.md) | You are setting variables, editing configs, or adding maps and campaigns. |
 | [docs/eight-players.md](docs/eight-players.md) | You want more than four survivors in a co-op campaign, or you are wondering what `maxplayers` does. |
+| [docs/mods.md](docs/mods.md) | You are adding a plugin, a MetaMod extension, or a custom map — and want to know whether it belongs on the volume or in the image. |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | The server is not appearing in the browser, or you are reading a confusing boot log. |
 | [docs/maintenance.md](docs/maintenance.md) | You are updating the game, the mods, or publishing a release. |
 

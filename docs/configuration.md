@@ -102,21 +102,13 @@ content rather than replacing it.
 ## SourceMod and MetaMod
 
 `data/left4dead2/addons/sourcemod` and `.../metamod` are **links into the
-image**. That is deliberate — they are versioned with the image — but it means
-edits there are lost on restart. To customise, replace the link with a real
-copy:
+image** — deliberately, so mods are versioned with the image rather than with
+whatever happened to be on the volume. That means editing inside them is lost
+on restart, and installing a plugin needs one deliberate step first.
 
-```bash
-podman compose exec l4d2 sh -c \
-  'rm -f /data/left4dead2/addons/sourcemod && cp -r /opt/l4d2/left4dead2/addons/sourcemod /data/left4dead2/addons/'
-```
-
-`rm -f` is deliberate: it removes the link and nothing else, and fails loudly
-rather than deleting anything if the path is already a real directory.
-
-Once it is a real directory, the farm leaves it alone and your changes survive
-restarts. Adding plugins that way means they are *not* tracked by git, so keep
-your own copy of the `.smx` files next to the repository.
+How to add a plugin, a MetaMod extension, or a custom map — and when a mod
+belongs in the image rather than on the volume — is in
+[mods.md](mods.md).
 
 ## What is not configurable, and why
 

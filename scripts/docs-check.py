@@ -59,6 +59,18 @@ for path in DOCS:
 
 
 # ---------------------------------------------------------------------------
+# 1b. Every document is indexed in the README, and nothing points at a doc that
+#     does not exist (the link check above covers the reverse direction).
+# ---------------------------------------------------------------------------
+readme = read(ROOT / "README.md")
+for path in DOCS:
+    if path.name == "README.md":
+        continue
+    if f"docs/{path.name}" not in readme:
+        fail(f"README.md: docs/{path.name} is not in the documentation index")
+
+
+# ---------------------------------------------------------------------------
 # 2. The environment variable table is .env.example, and the entrypoint reads it
 # ---------------------------------------------------------------------------
 entrypoint = read(ROOT / "entrypoint.sh")

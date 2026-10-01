@@ -138,6 +138,25 @@ clean-all:
 check:
     python3 scripts/docs-check.py
 
+# Confirm the 5+ plugin stack actually loaded. A clean boot prints no [SM]
+# lines at all; any of them means a dependency is missing.
+smoke-plugins: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scratch="$(mktemp -d)"; name="l4d2-plugins-$$"
+    trap 'podman rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$scratch"' EXIT
+    podman run -d --name "$name" --userns=keep-id --user 1000:1000 \
+        -e PORT=27097 -p 27097:27097/udp -p 27097:27097/tcp \
+        -v "$scratch:/data:Z" {{local_tag}} >/dev/null
+    sleep 50
+    if podman logs "$name" 2>&1 | grep -qE "\[SM\].*(Unable|Error|Exception)"; then
+        podman logs "$name" 2>&1 | grep -E "\[SM\]" | head -10
+        echo "plugin stack FAILED to load" >&2; exit 1
+    fi
+    echo "plugins on the image: $(podman exec "$name" ls /data/left4dead2/addons/sourcemod/plugins/ | grep -cE 'left4dhooks|multislots|unreservelobby|CreateSurvivorBot') of 4"
+    echo "l4dmultislots.cfg:  $(podman exec "$name" grep -c '^l4d_' /data/left4dead2/cfg/sourcemod/l4dmultislots.cfg) cvars"
+    echo "plugin stack OK"
+
 # Everything CI does, before pushing.
-verify: check smoke
-    @echo "check + smoke passed"
+verify: check smoke smoke-plugins
+    @echo "check + smoke + plugin stack all passed"

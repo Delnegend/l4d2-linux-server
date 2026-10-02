@@ -45,16 +45,6 @@ nothing is built on your machine. The first start downloads the game — about
 10 GB — so expect a multi-minute wait before `Self-check OK: server answers A2S
 queries` appears in the log. Every later start is instant.
 
-### Image tags
-
-| Tag | Meaning |
-|---|---|
-| `1.0.3` | An exact release. **Pin this for a real deployment.** |
-| `latest` | The newest release. Convenient, and only as fresh as your last pull. |
-
-Those are the only two tags. `:1.0.3` is the same image for everyone, there is
-no per-target tag, and a deployment should always name an exact version.
-
 ## Configuration
 
 Copy `.env.example` and change what you care about. The variables you are most

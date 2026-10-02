@@ -145,15 +145,15 @@ already expect.
 ```text
 /data/                          downloaded on the first start, then reused
 ├── .l4d2-manifest             which manifest produced this install
-├── srcds_run                  real file, from the depot
-├── bin/                       real, from the depot
-├── left4dead2/                real, from the depot
-│   ├── cfg/                   real - yours, and the one thing that survives
+├── srcds_run                  from the depot
+├── bin/                       from the depot
+├── left4dead2/                from the depot
+│   ├── cfg/                   yours, and the one thing that survives
 │   │   │                          a manifest change
-│   ├── addons/                real - ours, overwritten on every start
-│   ├── maps/                  real - drop workshop maps here
-│   └── scripts/               real - custom campaign definitions
-└── console.log                real file
+│   ├── addons/                ours, overwritten on every start
+│   ├── maps/                  drop workshop maps here
+│   └── scripts/               custom campaign definitions
+└── console.log                the server log
 ```
 
 There are no symlinks and nothing is copied out of the image except the 209 MB
@@ -172,23 +172,13 @@ mod overlay.
 - **`addons/` does not survive a manifest change, but it does not need to.** The
   overlay is applied on every start, not only after a download.
 
-### Upgrading from an image that baked the install in
-
-Nothing to do, and nothing to clean up by hand. A volume written by an older
-image holds a symlink farm with no `.l4d2-manifest`, so the first start of the
-new image sees `installed_manifest=none`, downloads the pinned manifest and
-replaces the tree. `left4dead2/cfg` is kept; everything else, including every
-dangling link, goes.
-
-Expect that first start to take as long as a download, and expect the volume to
-grow by ~10 GB — it now holds the install rather than pointing at it.
-
 ### One engine quirk worth knowing
 
 The engine resolves `exec` (as in `exec somefile.cfg`) against the **install
-root** — the real path of the `srcds_run` binary, which is now on the volume
-rather than in the image. `server.cfg.template` does not use `exec` anyway, so
-nothing changes; see [configuration.md](configuration.md#config-file-precedence).
+root** — the directory holding the `srcds_run` binary, which is now on the
+volume rather than in the image. `server.cfg.template` does not use `exec`
+anyway, so nothing changes; see
+[configuration.md](configuration.md#config-file-precedence).
 
 ## Runtime
 

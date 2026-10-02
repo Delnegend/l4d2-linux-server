@@ -164,6 +164,25 @@ declared_inputs = re.search(r"inputs:(.*)", workflow, re.S)
 if declared_inputs and re.search(r"^\s+version:", declared_inputs.group(1), re.M):
     fail("release.yaml: declares a 'version' input, so someone can type the version by hand")
 
+# A lowercase comparison is useless against `ghcr.io/${{ github.repository }}`:
+# the literal text is already lowercase and the capital D only appears after
+# expansion. So the value must be a literal with no expressions, and lowercase.
+image = re.search(r"^\s*IMAGE:\s*(.+?)\s*$", workflow, re.M)
+if not image:
+    fail("release.yaml: no IMAGE: line")
+else:
+    value = image.group(1)
+    if "${{" in value:
+        fail(
+            f"release.yaml: IMAGE '{value}' interpolates an expression; spell "
+            f"the image reference out in full lowercase instead"
+        )
+    elif value != value.lower():
+        fail(
+            f"release.yaml: IMAGE '{value}' is not lowercase; buildx rejects a "
+            f"mixed-case image reference and fails the release on it"
+        )
+
 for path in DOCS:
     for tag in re.findall(r"[\w.]+:(?:[\d.]+-(?:qol|coop8|base))", read(path)):
         fail(f"{path.relative_to(ROOT)}: advertises a retired tag '{tag}'")

@@ -11,16 +11,13 @@ name: Release
 #   feat:  -> minor      fix/refactor/build: -> patch
 #   everything else                 -> no bump, so nothing is released
 #
-# The version is automatic; the timing is not. This runs only when someone
-# dispatches it from Actions, because shipping an image is a deliberate act
-# rather than something that should happen because it was Sunday.
+# The version is automatic; the timing is not. Shipping an image is a
+# deliberate act, so this runs only when dispatched from Actions.
 #
-# `build` is in the patch list on top of the action's defaults, because this
-# repository uses `build:` for changes that genuinely ship inside the image
-# (Dockerfile, mod stack, overlay). Left at the default it would produce no
-# version at all, and an image change would go out under the previous tag.
-# Per docs/maintenance.md the image is ~528 MB and carries no game files, so
-# this build is about a minute rather than the eight it used to take.
+# `build` is in the patch list because this repository uses `build:` for
+# changes that ship inside the image (Dockerfile, mod stack, overlay). It
+# would otherwise produce no version, and an image change would go out under
+# the previous tag.
 
 on:
   # No inputs. There is deliberately no version field: the number comes from
@@ -36,7 +33,13 @@ permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  # A literal, lowercase, with no expressions. `${{ github.repository }}`
+  # expands to `Delnegend/...`, and buildx rejects a mixed-case image
+  # reference before it builds anything:
+  #   invalid tag "ghcr.io/Delnegend/l4d2-linux-server:1.1.0":
+  #   repository name must be lowercase
+  # `just check` enforces both halves of that rule.
+  IMAGE: ghcr.io/delnegend/l4d2-linux-server
 
 jobs:
   version:

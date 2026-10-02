@@ -1,0 +1,141 @@
+name: Release
+
+# One image, one version, decided by the commit history rather than by anyone
+# typing a number.
+#
+# `semver-action` reads the Conventional Commits since the latest tag and
+# returns the next version. Nothing here - no flag, no input, no hand-rolled
+# arithmetic - can override it, so the version is a fact about the commits and
+# not a claim someone made about them.
+#
+#   feat:  -> minor      fix/refactor/build: -> patch
+#   everything else                 -> no bump, so nothing is released
+#
+# The version is automatic; the timing is not. This runs only when someone
+# dispatches it from Actions, because shipping an image is a deliberate act
+# rather than something that should happen because it was Sunday.
+#
+# `build` is in the patch list on top of the action's defaults, because this
+# repository uses `build:` for changes that genuinely ship inside the image
+# (Dockerfile, mod stack, overlay). Left at the default it would produce no
+# version at all, and an image change would go out under the previous tag.
+# Per docs/maintenance.md the image is ~528 MB and carries no game files, so
+# this build is about a minute rather than the eight it used to take.
+
+on:
+  # No inputs. There is deliberately no version field: the number comes from
+  # the commits, so there is nothing to type and nothing to get wrong.
+  workflow_dispatch:
+
+# Serialise releases: two concurrent runs must never race for the same version.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  version:
+    # Orchestration only, so the single-core runner is enough.
+    runs-on: ubuntu-slim
+    outputs:
+      bump: ${{ steps.semver.outputs.bump }}
+      tag: ${{ steps.semver.outputs.next }}
+      version: ${{ steps.semver.outputs.nextStrict }}
+      current: ${{ steps.semver.outputs.current }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Next version (Conventional Commits since the latest tag)
+        id: semver
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # The oldest tag that exists, used only if every other tag is ever
+          # deleted. Must name a real tag or the action errors.
+          fallbackTag: v1.0.0
+          # The action's defaults are fix, bugfix, perf, refactor, test, tests.
+          # `build` is added because this repo ships image changes under that
+          # prefix, and those must move the version.
+          patchList: fix, bugfix, perf, refactor, test, tests, build
+          # Nothing to release is a normal outcome, not a failure.
+          noNewCommitBehavior: silent
+          noVersionBumpBehavior: silent
+
+      - name: Report
+        run: |
+          echo "current: ${{ steps.semver.outputs.current || 'none' }}"
+          echo "bump:    ${{ steps.semver.outputs.bump }}"
+          echo "next:    ${{ steps.semver.outputs.next || 'none' }}"
+
+  build:
+    needs: version
+    if: needs.version.outputs.bump != 'none'
+    # A container image build, so it needs the full runner's toolchain.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to create the release and its tag
+      packages: write   # to push to ghcr.io
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One published image, with exactly two tags: the exact version and
+      # `latest`. No rolling major.minor or major tags, and no per-target tag,
+      # so `:1.0.3` always means the same thing and there is nothing ambiguous
+      # to accidentally deploy.
+      #
+      # The registry blobs are zstd level 4. Anything that pulls this image
+      # needs a runtime that understands zstd layers (containerd 1.7+,
+      # Docker 20.10+, podman 3+); if that ever stops being true, change
+      # `outputs` to `type=image,compression=gzip`.
+      - name: Build and push server
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: server
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            SERVER_VERSION=${{ needs.version.outputs.version }}
+          outputs: type=image,compression=zstd,compression-level=4
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.version.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Runs last so it only happens once the image exists. Creating the
+      # release also creates the tag, which is what the next week's version
+      # calculation compares against. If this step fails, no tag exists, so the
+      # next run recomputes the same version and retries.
+      - name: Publish the release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          generate_release_notes: true

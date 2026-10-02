@@ -62,8 +62,8 @@ as a status board.
 
 Run it by hand from **Actions → Upstream updates → Run workflow**.
 
-Merging a bump does **not** publish. `publish.yaml` still needs a release, and
-the tag policy below still applies.
+Merging a bump does **not** publish. It lands on `main`, and releasing is a
+separate button press — see [When it runs](#when-it-runs).
 
 ### Enabling auto-merge
 
@@ -145,8 +145,46 @@ workflow — the current pin is in the Dockerfile as `ARG L4DTOOLZ_VERSION`.
 
 ## Releases and tags
 
-Publishing is driven by `.github/workflows/publish.yaml`: a GitHub release (or a
-manual `workflow_dispatch` with a version) builds and pushes.
+`.github/workflows/release.yaml` ships the image, and **nobody types a version
+number**. The version is derived from the commit history by
+[`ietf-tools/semver-action`](https://github.com/ietf-tools/semver-action), which
+reads the Conventional Commits since the last tag:
+
+| Commit prefix | Version moves |
+|---|---|
+| `feat:` | minor — `1.0.3` → `1.1.0` |
+| `fix:`, `refactor:`, `perf:`, `test:`, `build:` | patch — `1.0.3` → `1.0.4` |
+| anything breaking (`BREAKING CHANGE:`) | major — `1.0.3` → `2.0.0` |
+| `docs:`, `ci:`, `chore:` | **nothing** |
+
+`build:` counts as a patch rather than as nothing, because this repository uses
+that prefix for changes that really do ship inside the image — the Dockerfile,
+the mod stack, the overlay.
+
+So the version is a fact about the commits rather than a claim someone made
+about them.
+
+### When it runs
+
+**Actions → Release → Run workflow.** By hand, and only by hand. There is no
+schedule: shipping a new image to everyone who pulls `:latest` is a deliberate
+act, not something that should happen because it was Sunday.
+
+The run takes no inputs. If it decides there is nothing worth releasing, the
+build job is skipped and the run ends green having published nothing.
+
+So the decision is two separate ones, and only one of them is automatic:
+
+| | Decided by | You can override? |
+|---|---|---|
+| **What version** | the commit messages | no — nothing in the workflow accepts a number |
+| **Whether to ship** | you, by pressing the button | that is the button |
+
+If you dispatch it and it publishes nothing, the commits since the last tag did
+not earn a bump. Fix that in the commit message — `git commit --amend` to
+`fix:` rather than `chore:` — rather than looking for a number to type.
+
+### The tags themselves
 
 | Tag | Points at |
 |---|---|
@@ -155,7 +193,8 @@ manual `workflow_dispatch` with a version) builds and pushes.
 
 One published image, exactly two tags: the exact version and `latest`. No
 rolling `1.0` or `1` tags, and no per-target tags — so there is nothing
-ambiguous for a deployment to latch onto by accident.
+ambiguous for a deployment to latch onto by accident. `just check` fails the
+build if that ever changes, so the policy cannot drift quietly.
 
 The **game build is not part of the tag**, and deliberately so. It is a
 per-deployment property, set with `GAME_MANIFEST` in `.env`, and putting it in
@@ -165,7 +204,7 @@ contain. The consequence is the one worth stating plainly: `:latest` and
 deployments on the same tag are only on the same game build if they agree on
 `GAME_MANIFEST`. Set it explicitly if that matters to you.
 
-A publish is now under a minute from a cold cache, because there is no 10 GB in
+A publish is under a minute from a cold cache, because there is no 10 GB in
 the build.
 
 To push a locally built image with the same compression:

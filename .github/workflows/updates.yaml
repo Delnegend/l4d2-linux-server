@@ -110,7 +110,8 @@ jobs:
 
           `just verify` downloads both pinned manifests, boots the server and
           checks the plugin stack, so a green `Check (just verify)` is the
-          proof. Merging does not publish: `publish.yaml` still needs a release.
+          proof. Merging does not publish: it lands on `main`, and releasing is
+          a separate deliberate run of `release.yaml`.
 
           MetaMod and SourceMod are not pinned and need nothing here. The
           current drops on `${{ needs.resolve.outputs.sourcemod_branch }}` are

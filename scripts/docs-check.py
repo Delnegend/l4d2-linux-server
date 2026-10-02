@@ -142,15 +142,27 @@ for names_cell, values_cell in build_arg_row.findall(arch):
 # ---------------------------------------------------------------------------
 # 5. Tag policy: semver + latest only, no per-target tags anywhere
 # ---------------------------------------------------------------------------
-workflow = read(ROOT / ".github/workflows/publish.yaml")
+# The release workflow, and the job that decides the version. The version is
+# derived from the Conventional Commits since the last tag, so the check is
+# that the image tag comes from that output and not from something typed.
+workflow = read(ROOT / ".github/workflows/release.yaml")
 pushed = set(re.findall(r"^\s*\$\{\{ env\.IMAGE \}\}:(.+?)\s*$", workflow, re.M))
 pushed = {tag for tag in pushed if "IMAGE" not in tag}
 
 if "latest" not in pushed:
-    fail("publish.yaml: does not push a 'latest' tag")
+    fail("release.yaml: does not push a 'latest' tag")
 for tag in pushed:
     if tag.endswith(("-base", "-qol", "-coop8")) or tag in {"base", "qol", "coop8"}:
-        fail(f"publish.yaml: still pushes a per-target tag '{tag}'")
+        fail(f"release.yaml: still pushes a per-target tag '{tag}'")
+
+# Match the `uses:` line, not the bare name: the workflow explains semver-action
+# in prose, so a substring test on "semver-action" passes even if the step that
+# actually computes the version has been deleted.
+if "uses: ietf-tools/semver-action" not in workflow:
+    fail("release.yaml: the version must come from the semver-action step, not a manual input")
+declared_inputs = re.search(r"inputs:(.*)", workflow, re.S)
+if declared_inputs and re.search(r"^\s+version:", declared_inputs.group(1), re.M):
+    fail("release.yaml: declares a 'version' input, so someone can type the version by hand")
 
 for path in DOCS:
     for tag in re.findall(r"[\w.]+:(?:[\d.]+-(?:qol|coop8|base))", read(path)):
@@ -159,27 +171,20 @@ for path in DOCS:
 # ---------------------------------------------------------------------------
 # 6. The compression claim in the docs matches the workflow
 # ---------------------------------------------------------------------------
-if "compression=zstd" not in workflow:
-    fail("publish.yaml: registry compression is not zstd")
-level = re.search(r"compression-level=(\d+)", workflow)
-if not level:
-    fail("publish.yaml: no compression level set")
 
 # Exactly two tags, and one of them must be the exact version. A rolling
 # `1.0`/`1` tag is as much a policy change as a per-target one.
-version_refs = [t for t in pushed if "version.outputs" in t]
+version_refs = [t for t in pushed if "outputs.version" in t]
 if len(pushed) != 2:
-    fail(f"publish.yaml: pushes {len(pushed)} tags {sorted(pushed)}, expected exactly 2")
+    fail(f"release.yaml: pushes {len(pushed)} tags {sorted(pushed)}, expected exactly 2")
 if len(version_refs) != 1:
-    fail("publish.yaml: exactly one tag must be the exact version")
-if "latest" not in pushed:
-    fail("publish.yaml: does not push a 'latest' tag")
+    fail("release.yaml: exactly one tag must be the exact version")
 
 if "compression=zstd" not in workflow:
-    fail("publish.yaml: registry compression is not zstd")
+    fail("release.yaml: registry compression is not zstd")
 level = re.search(r"compression-level=(\d+)", workflow)
 if not level:
-    fail("publish.yaml: no compression level set")
+    fail("release.yaml: no compression level set")
 elif f"level {level.group(1)}" not in arch and f"zstd level {level.group(1)}" not in arch:
     fail(
         f"docs/architecture.md: does not mention the zstd level "

@@ -49,14 +49,14 @@ queries` appears in the log. Every later start is instant.
 
 Copy `.env.example` and change what you care about. The variables you are most
 likely to touch:
-- `GAME_MANIFEST` — which Steam depot manifest to install. Set it to move to a
-  new Valve build without a new image. Defaults to the image's value.
-- `SERVER_NAME` — `hostname`. Defaults to `Left 4 Dead 2 Dedicated Server`.
-- `RCON_PASSWORD` — `rcon_password`. Change it. Defaults to `ChangeThisRcon123`.
-- `DEFAULT_MAP` — `+map`. Defaults to `c1m1_hotel`.
-- `STEAM_GROUP_ID` — lists the server in that Steam group's server list.
-  Defaults to `""` (off).
-- `SERVER_PASSWORD` — `sv_password`. Leave empty; it can hang the client prompt.
+| Variable | Default | Does |
+|---|---|---|
+| `GAME_MANIFEST` | the image's value | Which Steam depot manifest to install. Set it to move to a new Valve build without a new image. |
+| `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
+| `RCON_PASSWORD` | `ChangeThisRcon123` | `rcon_password` — change it |
+| `DEFAULT_MAP` | `c1m1_hotel` | `+map` |
+| `STEAM_GROUP_ID` | `""` | Lists the server in that Steam group's server list |
+| `SERVER_PASSWORD` | `""` | `sv_password` — leave empty, it can hang the client prompt |
 
 **The full variable reference, config file precedence, custom map and campaign
 paths, and the cvars L4D2 does *not* have** are in
@@ -90,14 +90,22 @@ co-op campaign to four survivors is something else entirely — see
 
 ## Documentation
 
-| Document | Read it when |
-|---|---|
-| [docs/architecture.md](docs/architecture.md) | You want to know how the image is layered, how `/data` is joined to it, or what a build argument does. |
-| [docs/configuration.md](docs/configuration.md) | You are setting variables, editing configs, or adding maps and campaigns. |
-| [docs/eight-players.md](docs/eight-players.md) | You want more than four survivors in a co-op campaign, or you are wondering what `maxplayers` does. |
-| [docs/mods.md](docs/mods.md) | You are adding a plugin, a MetaMod extension, or a custom map — and want to know whether it belongs on the volume or in the image. |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | The server is not appearing in the browser, or you are reading a confusing boot log. |
-| [docs/maintenance.md](docs/maintenance.md) | You are updating the game, the mods, or publishing a release. |
+- **[docs/architecture.md](docs/architecture.md)** — read it when you want to know
+  how the image is layered, how `/data` is joined to it, or what a build
+  argument does.
+- **[docs/configuration.md](docs/configuration.md)** — read it when you are
+  setting variables, editing configs, or adding maps and campaigns.
+- **[docs/eight-players.md](docs/eight-players.md)** — read it when you want more
+  than four survivors in a co-op campaign, or you are wondering what
+  `maxplayers` does.
+- **[docs/mods.md](docs/mods.md)** — read it when you are adding a plugin, a
+  MetaMod extension, or a custom map, and want to know whether it belongs on the
+  volume or in the image.
+- **[docs/troubleshooting.md](docs/troubleshooting.md)** — read it when the
+  server is not appearing in the browser, or you are reading a confusing boot
+  log.
+- **[docs/maintenance.md](docs/maintenance.md)** — read it when you are updating
+  the game, the mods, or publishing a release.
 
 ---
 

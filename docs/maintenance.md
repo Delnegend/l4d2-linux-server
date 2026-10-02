@@ -56,6 +56,11 @@ downloads both pinned manifests, boots the server, checks the A2S self-check
 and the plugin stack, and fails on any `Unknown command` the game build
 introduced. So a merged bump is a booted one.
 
+> Auto-merge and branch protection are already enabled on the repository, so
+> there is nothing to configure by hand. They live in the repository's
+> settings rather than in this file; if they are ever reset, the `gh` commands
+> that set them up are in this file's history.
+
 Every run, stale or not, updates a single `Upstream pin state` issue with where
 the pins actually are. It is edited in place rather than re-posted, so it reads
 as a status board.
@@ -64,33 +69,6 @@ Run it by hand from **Actions → Upstream updates → Run workflow**.
 
 Merging a bump does **not** publish. It lands on `main`, and releasing is a
 separate button press — see [When it runs](#when-it-runs).
-
-### Enabling auto-merge
-
-`gh pr merge --auto` does nothing unless the repository allows it. Two one-time
-commands, both need admin:
-
-```bash
-gh repo edit Delnegend/l4d2-linux-server \
-  --enable-auto-merge --enable-rebase-merge --delete-branch-on-merge
-
-gh api -X PUT repos/Delnegend/l4d2-linux-server/branches/main/protection \
-  -H "Accept: application/vnd.github+json" --input - <<'EOF'
-{
-  "required_status_checks": { "strict": true, "contexts": ["Check (just verify)"] },
-  "enforce_admins": false,
-  "required_pull_request_reviews": null,
-  "restrictions": null,
-  "required_linear_history": true,
-  "allow_force_pushes": false,
-  "allow_deletions": false,
-  "allow_auto_merge": true
-}
-EOF
-```
-
-Under **Settings → Actions → General → Workflow permissions**, confirm **Allow
-GitHub Actions to create and approve pull requests** is checked.
 
 ## Updating MetaMod and SourceMod
 

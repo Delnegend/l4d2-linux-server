@@ -49,14 +49,14 @@ queries` appears in the log. Every later start is instant.
 
 Copy `.env.example` and change what you care about. The variables you are most
 likely to touch:
-| Variable | Default | Does |
-|---|---|---|
-| `GAME_MANIFEST` | the image's value | Which Steam depot manifest to install. Set it to move to a new Valve build without a new image. |
-| `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
-| `RCON_PASSWORD` | `ChangeThisRcon123` | `rcon_password` — change it |
-| `DEFAULT_MAP` | `c1m1_hotel` | `+map` |
-| `STEAM_GROUP_ID` | `""` | Lists the server in that Steam group's server list |
-| `SERVER_PASSWORD` | `""` | `sv_password` — leave empty, it can hang the client prompt |
+- `GAME_MANIFEST` — which Steam depot manifest to install. Set it to move to a
+  new Valve build without a new image. Defaults to the image's value.
+- `SERVER_NAME` — `hostname`. Defaults to `Left 4 Dead 2 Dedicated Server`.
+- `RCON_PASSWORD` — `rcon_password`. Change it. Defaults to `ChangeThisRcon123`.
+- `DEFAULT_MAP` — `+map`. Defaults to `c1m1_hotel`.
+- `STEAM_GROUP_ID` — lists the server in that Steam group's server list.
+  Defaults to `""` (off).
+- `SERVER_PASSWORD` — `sv_password`. Leave empty; it can hang the client prompt.
 
 **The full variable reference, config file precedence, custom map and campaign
 paths, and the cvars L4D2 does *not* have** are in

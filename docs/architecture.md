@@ -62,8 +62,8 @@ that already takes the better part of a minute.
 |---|---|---|
 | `server` | 528 MB | 81 MB Debian + 130 MB 32-bit runtime libraries + 209 MB mod overlay + ~108 MB DepotDownloader and tools |
 
-Before the move to a runtime download this image was 10.3 GB, of which 9.82 GB
-was the install. That one deletion is the whole size story.
+The install is not in it, and that accounts for essentially all of the size:
+it would otherwise add 9.82 GB.
 
 `linux64/` is removed from the MetaMod modules: the engine is a 32-bit build, and
 the 64-bit module only produces dlopen noise

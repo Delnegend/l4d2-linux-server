@@ -226,16 +226,15 @@ Steps 2 and 3 are the ones that need a human.
 
 ## Why the download happens at run time
 
-The alternative — baking the install into the image — was the previous design,
-and it cost a 10.3 GB pull for every deployment and an 8-minute CI build for
-every release. It made a routine Valve patch an infrastructure event, and it
-needed a farm of symlinks to reconcile a read-only install with a writable
-volume.
+The alternative is to bake the install into the image. That costs a 10.3 GB
+pull for every deployment and an 8-minute build for every release, so a routine
+Valve patch becomes an infrastructure event, and reconciling a read-only
+install with a writable volume needs a farm of symlinks.
 
 Downloading at run time puts the cost where it belongs: once per volume, on the
 machine that is going to run the server, against a manifest that names exactly
-one set of files. The image becomes 528 MB, the release takes under a minute,
-and moving to a new Valve build is an `.env` edit.
+one set of files. The image is 528 MB, a release takes under a minute, and
+moving to a new Valve build is an `.env` edit.
 
 What it costs, stated plainly: a fresh volume pays a multi-minute download
 before the server answers anything, and the install is now volume state, so two

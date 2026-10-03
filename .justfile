@@ -118,7 +118,7 @@ smoke: build
             ready=1
             break
         fi
-        if [ "$({{engine}} inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" != "true" ]; then
+        if [ "$({{engine}} inspect -f '{{"{{.State.Running}}"}}' "$name" 2>/dev/null)" != "true" ]; then
             {{engine}} logs --tail 40 "$name" 2>&1 || true
             echo "smoke test FAILED: the container exited before initializing" >&2
             exit 1

@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -14,8 +16,10 @@ concurrency:
 
 jobs:
   verify:
-    # Branch protection requires exactly this check name. Auto-merge is only
-    # ever enabled on it, so nothing lands without a real boot behind it.
+    # This is the gate. main has no branch protection behind it, so this run is
+    # the only thing between a commit and a published image: it boots a real
+    # server, checks the A2S self-check and the plugin stack, and fails on any
+    # `Unknown command` the game build introduces.
     name: Check (just verify)
     runs-on: ubuntu-latest
 

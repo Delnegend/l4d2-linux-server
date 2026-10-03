@@ -23,28 +23,20 @@ On every start the entrypoint copies the overlay the image carries at
 differently on purpose:
 
 ```text
-data/left4dead2/addons/         image files overwrite same-named files, nothing deleted
+data/left4dead2/addons/         image overlay symlinked in; user files on volume stick
 data/left4dead2/cfg/            no-clobber - seeded from the image only where missing
-data/left4dead2/maps/           yours
-data/left4dead2/scripts/        yours
+data/left4dead2/maps/           yours, real directory on volume
+data/left4dead2/scripts/        yours, real directory on volume
 ```
 
 So:
 
 - **A file in `cfg/`, `maps/` or `scripts/` sticks.** Real files on the volume,
-  surviving restarts. Verified.
-- **A file in `addons/` sticks across restarts too** — but only by accident of
-  how `cp -a` behaves. The overlay copy overwrites files whose names it shares
-  with the volume and leaves every other file alone, so a `.vpk` you dropped in
-  is still there tomorrow. Verified with a marker file and a restart.
-- **A file in `addons/` is lost the moment the install is replaced** — a
-  manifest change, or a new volume. The swap deletes every top-level entry in
-  `/data` before moving the new tree in, and `left4dead2/cfg` is the single
-  exception. This is the one that bites: it looks like a restart and it is not.
-
-There is no symlink anywhere to check for first — `ls -ld` on any of these paths
-shows a real directory. What decides the outcome is which directory it is, and
-for `addons/` whether an install is due.
+  surviving restarts.
+- **A custom plugin or file in `addons/` sticks across restarts too.**
+  The entrypoint symlinks the image's mod overlay without deleting existing
+  volume files. If you run in `VANILLA=true` mode, image overlay symlinks are
+  temporarily unlinked, leaving your custom volume files intact.
 
 `cfg/` is seeded with no-clobber rather than overwritten, because
 `server_custom.cfg`, `sourcemod.cfg` and `l4dmultislots.cfg` are yours to tune.

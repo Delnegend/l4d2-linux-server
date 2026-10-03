@@ -35,13 +35,7 @@ own_volume := if engine == "docker" { "sudo chown -R 1000:1000 \"$scratch\"" } e
 # rather than looking at it, which is also engine-agnostic.
 drop_volume := if engine == "docker" { "sudo rm -rf \"$scratch\" >/dev/null 2>&1 || true" } else { "rm -rf \"$scratch\" >/dev/null 2>&1 || true" }
 
-# The image carries no game files, so the ~10 GB install lands on the volume at
-# run time. The smoke volume therefore cannot be a tmpfs - it needs real disk -
-# and it lives under L4D2_SMOKE_DIR (the working tree by default) so where that
-# disk is stays obvious and `just clean` can find it.
 smoke_dir := env_var_or_default("L4D2_SMOKE_DIR", ".smoke")
-install_gb := "11"
-install_timeout := env_var_or_default("L4D2_INSTALL_TIMEOUT", "2400")
 
 # Build arguments. Anything here can be overridden from the environment, e.g.
 #   SOURCEMOD_BRANCH=1.13 just build
@@ -64,11 +58,13 @@ config:
 build:
     {{engine}} build {{build_args}} -t {{local_tag}} .
 
+# Build the vanilla 4-player server without mods.
+build-vanilla:
+    {{engine}} build --target vanilla {{build_args}} -t localhost/l4d2:vanilla .
+
 # Run the locally built image with compose, recreating the container.
 up: build
     #!/usr/bin/env bash
-    # The first start of a volume downloads the pinned depot manifest, ~10 GB,
-    # once. Later starts reuse it.
     set -euo pipefail
     L4D2_IMAGE={{local_tag}} {{engine}} compose up -d --force-recreate
 
@@ -84,7 +80,7 @@ down:
 logs:
     {{engine}} compose logs -f
 
-# Open a shell in the running server, where the install lives on the volume.
+# Open a shell in the running server.
 shell:
     {{engine}} compose exec l4d2 /bin/bash
 
@@ -92,19 +88,11 @@ shell:
 run-in command:
     {{engine}} compose exec l4d2 /bin/bash -c "{{command}}"
 
-# Boot the freshly built image on a scratch volume: install, A2S, plugin stack.
-#
-# It downloads ~11 GB into that volume every run, because a scratch volume has
-# no install to reuse - the price of an image that does not carry the game.
+# Boot the freshly built image on a scratch volume: linking, A2S, plugin stack.
 smoke: build
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # `logs | grep -q` is a trap under `pipefail`: grep -q exits on the first
-    # match, the writer takes SIGPIPE, and the pipeline reports non-zero - so a
-    # line that IS in the log reads as missing. It is certain here, because the
-    # download writes hundreds of megabytes of progress. Counting instead of
-    # matching reads the stream to the end, and --tail keeps it bounded.
     log_has() {
         [ "$({{engine}} logs --tail 400 "$1" 2>&1 | grep -c -F -- "$2" || true)" -gt 0 ]
     }
@@ -114,13 +102,6 @@ smoke: build
     name="l4d2-smoke-$$"
     trap '{{engine}} rm -f "$name" >/dev/null 2>&1 || true; {{drop_volume}}' EXIT
 
-    avail_mb="$(df -Pm "$(dirname "$scratch")" | awk 'NR==2 {print $4}')"
-    if [ "${avail_mb}" -lt $(( {{install_gb}} * 1000 )) ]; then
-        echo "smoke test needs about {{install_gb}} GB of real disk on $(dirname "$scratch")," >&2
-        echo "and there is only ${avail_mb} MB. Point L4D2_SMOKE_DIR at a bigger filesystem." >&2
-        exit 1
-    fi
-
     {{own_volume}}
     {{engine}} run -d --name "$name" \
         {{userns}} --user 1000:1000 \
@@ -129,39 +110,29 @@ smoke: build
         -v "$scratch:/data:Z" \
         {{local_tag}} >/dev/null
 
-    # The stamp is the install's own statement that it is finished, and the same
-    # one the entrypoint reads to decide whether to skip the download - so it is
-    # exactly the condition the next start depends on.
-    #
-    # Ask the container, never the host. After own_volume the volume belongs to
-    # uid 1000, and the calling user cannot traverse a 0700 mktemp directory:
-    # a host-side test fails with EACCES, silently, and the loop then waits out
-    # the whole timeout on a server that is already up and answering A2S.
-    echo "waiting for the install on the volume (up to $(( {{install_timeout}} / 60 )) min)..."
-    deadline=$((SECONDS + {{install_timeout}}))
+    echo "waiting for the server to initialize (up to 60s)..."
+    deadline=$((SECONDS + 60))
     ready=0
     while [ "${SECONDS}" -lt "${deadline}" ]; do
-        if {{engine}} exec "$name" test -x /data/srcds_run \
-           && {{engine}} exec "$name" test -f /data/left4dead2/.l4d2-manifest; then
+        if {{engine}} exec "$name" test -x /data/srcds_run; then
             ready=1
             break
         fi
-        if [ "$({{engine}} inspect -f '{{"{{.State.Running}}"}}' "$name" 2>/dev/null)" != "true" ]; then
+        if [ "$({{engine}} inspect -f '{{.State.Running}}' "$name" 2>/dev/null)" != "true" ]; then
             {{engine}} logs --tail 40 "$name" 2>&1 || true
-            echo "smoke test FAILED: the container exited before the install was ready" >&2
+            echo "smoke test FAILED: the container exited before initializing" >&2
             exit 1
         fi
-        sleep 15
+        sleep 2
     done
     if [ "${ready}" -ne 1 ]; then
         {{engine}} logs --tail 40 "$name" 2>&1 || true
-        echo "smoke test FAILED: no install within $(( {{install_timeout}} / 60 )) min" >&2
+        echo "smoke test FAILED: server did not initialize within 60s" >&2
         exit 1
     fi
-    echo "install: $({{engine}} exec "$name" cat /data/left4dead2/.l4d2-manifest)"
 
     # Give the server time to load the plugin stack before judging it.
-    sleep 50
+    sleep 35
 
     if [ "$({{engine}} logs "$name" 2>&1 | grep -cE '\[SM\].*(Unable|Error|Exception)' || true)" -gt 0 ]; then
         {{engine}} logs "$name" 2>&1 | grep -E '\[SM\]' | sed -n '1,10p' || true
@@ -176,10 +147,6 @@ smoke: build
         if log_has "$name" "Self-check OK"; then
             {{engine}} logs "$name" 2>&1 | grep -E "Self-check OK|Players:|Appending" || true
 
-            # Post-update check 2 from docs/maintenance.md: a game build that
-            # drops a cvar shows up here and nowhere else, because the engine is
-            # silent about unknown commands everywhere except the log. One line
-            # is known and expected.
             unknown="$({{engine}} logs "$name" 2>&1 \
                 | grep -o 'Unknown command "[^"]*"' | sort -u || true)"
             unexpected="$(printf '%s\n' "${unknown}" \
@@ -230,10 +197,18 @@ clean:
     -rm -rf "{{smoke_dir}}"
     @echo "removed local build images and the smoke volumes; ./data was left alone"
 
-# Validate the docs against the code they describe. See scripts/docs-check.py.
+# Full clean, including the downloaded game in the local build cache. Slow and
+# irreversible: the next build re-downloads ~10 GB.
+clean-all:
+    {{engine}} rmi -f $({{engine}} images -q --filter reference='localhost/l4d2*') 2>/dev/null || true
+    {{engine}} builder prune -f
+    -rm -rf "{{smoke_dir}}"
+    @echo "pruned the build cache; the next build re-downloads the game"
+
+# Validate the docs against the code it describes. See scripts/docs-check.py.
 check:
     python3 scripts/docs-check.py
 
 # Everything CI does, before pushing.
 verify: check smoke
-    @echo "check + smoke (install, A2S self-check, plugin stack) all passed"
+    @echo "check + smoke (linking, A2S self-check, plugin stack) all passed"

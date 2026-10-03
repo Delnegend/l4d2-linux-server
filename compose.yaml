@@ -17,6 +17,7 @@ services:
     environment:
       - PORT=${PORT:-27015}
       - STEAM_PORT=${STEAM_PORT:-26901}
+      - VANILLA=${VANILLA:-false}
       - SERVER_NAME=${SERVER_NAME:-Left 4 Dead 2 Dedicated Server}
       - RCON_PASSWORD=${RCON_PASSWORD:-ChangeThisRconPassword123}
       - SERVER_PASSWORD=${SERVER_PASSWORD:-}
@@ -27,10 +28,9 @@ services:
       - SV_PURE=${SV_PURE:-0}
       - EXTRA_ARGS=${EXTRA_ARGS:-}
       # GAME_MANIFEST is deliberately absent here: an empty interpolation
-      # default would override the value the image bakes in and leave the
-      # entrypoint with no manifest at all. The image's ARG is the default and
-      # the .env file above is the override.
+      # default would override the value the image bakes in. The image's ARG
+      # is the default and the .env file above is the override.
     volumes:
-      # Everything lives here: the ~10 GB install the entrypoint downloads on
-      # the first start, plus the configuration and logs it writes.
+      # Persistent configuration, custom maps, and server logs.
+      # The ~10 GB game install is baked into the image.
       - ./data:/data

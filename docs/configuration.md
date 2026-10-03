@@ -12,6 +12,7 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 | Variable | Default | Renders / does |
 |---|---|---|
 | `GAME_MANIFEST` | the image's `ARG` | Steam depot manifest id to install. Empty takes the one baked into the image. Setting it makes the next start of the volume download that build instead — see [maintenance.md](maintenance.md#updating-the-game). |
+| `VANILLA` | `false` | Run as a vanilla 4-player server without SourceMod/l4dtoolz (`true` or `false`). |
 | `PORT` | `27015` | `-port` |
 | `STEAM_PORT` | `26901` | `-sport` |
 | `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
@@ -24,9 +25,7 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 | `SV_PURE` | `0` | `sv_pure` |
 | `EXTRA_ARGS` | `""` | Appended to the `srcds_run` command line. Certain flags are rejected at startup — see [troubleshooting.md](troubleshooting.md#rejected-flags). |
 
-**Player count is not an environment variable.** The image always launches with
-`+maxplayers 8`; the engine overwrites that value itself, and what actually
-matters is in [eight-players.md](eight-players.md).
+**Player count is governed by the mode.** The image launches with `+maxplayers 8` by default, or `+maxplayers 4` when `VANILLA=true`; see [eight-players.md](eight-players.md).
 
 > **`SERVER_PASSWORD` is best left empty.** L4D2 has a long-standing bug where
 > the password prompt hangs when `sv_allow_lobby_connect_only` is `0`, which is

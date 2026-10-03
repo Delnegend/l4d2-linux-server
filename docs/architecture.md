@@ -50,7 +50,7 @@ them belongs to us and the other to you:
 
 | Directory | Rule | Why |
 |---|---|---|
-| `addons/` | overwritten | MetaMod, SourceMod, l4dtoolz and the 5+ plugins are ours, and an image update has to reach a volume that already has the right game build. |
+| `addons/` | overwritten, name by name | MetaMod, SourceMod, l4dtoolz and the 5+ plugins are ours, and an image update has to reach a volume that already has the right game build. `cp -a` overwrites the files it shares with the overlay and deletes nothing, so it is a merge that only ours win. |
 | `cfg/` | **no-clobber** | `server_custom.cfg`, `sourcemod.cfg` and `l4dmultislots.cfg` are yours. A seed that only fills in what is missing cannot overwrite a tuned file. |
 
 Applying it costs ~209 MB of copying per start, which is seconds next to a boot
@@ -150,7 +150,8 @@ already expect.
 ├── left4dead2/                from the depot
 │   ├── cfg/                   yours, and the one thing that survives
 │   │   │                          a manifest change
-│   ├── addons/                ours, overwritten on every start
+│   ├── addons/                ours on top of yours; the whole directory
+│   │                             goes when the install is replaced
 │   ├── maps/                  drop workshop maps here
 │   └── scripts/               custom campaign definitions
 └── console.log                the server log
@@ -169,8 +170,11 @@ mod overlay.
 - **`left4dead2/cfg` survives a manifest change.** It is parked beside the
   staging tree before the swap and put back after, because the engine and
   SourceMod write into it and `server_custom.cfg` lives there.
-- **`addons/` does not survive a manifest change, but it does not need to.** The
-  overlay is applied on every start, not only after a download.
+- **`addons/` does not survive a manifest change, and unlike the rest of the
+  install nobody puts it back.** The overlay is re-applied on every start, so
+  the plugins return — but content the *operator* dropped in there, workshop
+  VPKs above all, is gone for good. `cfg/` is the only exception. If you have
+  campaign content on the volume, keep it in `maps/`.
 
 ### One engine quirk worth knowing
 

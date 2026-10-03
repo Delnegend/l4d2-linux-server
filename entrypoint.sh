@@ -374,8 +374,10 @@ fi
 # and they are applied on every start - not only after a download - so an image
 # update reaches a volume that already carries the right game build.
 #
-# addons/ is ours and is overwritten. cfg/ is the operator's and is copied
+# addons/ is ours and wins any name collision; the copy deletes nothing, so an
+# operator's file there survives restarts. cfg/ is the operator's and is copied
 # without clobbering, so a tuned sourcemod.cfg or l4dmultislots.cfg survives.
+# Neither is durable across an install swap, which replaces everything but cfg/.
 # --no-preserve=ownership because the overlay is root-owned in the image and the
 # install is written by an unprivileged user.
 log "Applying the mod stack from ${OVERLAY_DIR}..."

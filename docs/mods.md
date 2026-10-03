@@ -18,13 +18,13 @@ a SourceMod plugin, a MetaMod extension, or map/campaign content.
 
 ## The rule that governs everything
 
-`addons/` belongs to the image. On every start the entrypoint copies the
-overlay it carries at `/opt/l4d2-overlay` over
-`data/left4dead2/addons/`, overwriting what is there:
+On every start the entrypoint copies the overlay the image carries at
+`/opt/l4d2-overlay` over the install, and it merges `addons/` and `cfg/`
+differently on purpose:
 
 ```text
-data/left4dead2/addons/         overwritten every start from the image
-data/left4dead2/cfg/            yours - seeded from the image, never overwritten
+data/left4dead2/addons/         image files overwrite same-named files, nothing deleted
+data/left4dead2/cfg/            no-clobber - seeded from the image only where missing
 data/left4dead2/maps/           yours
 data/left4dead2/scripts/        yours
 ```
@@ -33,13 +33,28 @@ So:
 
 - **A file in `cfg/`, `maps/` or `scripts/` sticks.** Real files on the volume,
   surviving restarts. Verified.
-- **A file in `addons/` does not stick.** It is replaced on the next start.
+- **A file in `addons/` sticks across restarts too** — but only by accident of
+  how `cp -a` behaves. The overlay copy overwrites files whose names it shares
+  with the volume and leaves every other file alone, so a `.vpk` you dropped in
+  is still there tomorrow. Verified with a marker file and a restart.
+- **A file in `addons/` is lost the moment the install is replaced** — a
+  manifest change, or a new volume. The swap deletes every top-level entry in
+  `/data` before moving the new tree in, and `left4dead2/cfg` is the single
+  exception. This is the one that bites: it looks like a restart and it is not.
 
 There is no symlink anywhere to check for first — `ls -ld` on any of these paths
-shows a real directory. What decides the outcome is which directory it is.
+shows a real directory. What decides the outcome is which directory it is, and
+for `addons/` whether an install is due.
 
 `cfg/` is seeded with no-clobber rather than overwritten, because
 `server_custom.cfg`, `sourcemod.cfg` and `l4dmultislots.cfg` are yours to tune.
+
+> **Keep content that costs you a download out of `addons/`.** A campaign VPK
+> there survives restarts but not a game update, and the loss is silent — the
+> server boots perfectly without it. `maps/` and `scripts/` are real directories
+> the overlay never touches, and the engine loads from them, so a campaign that
+> belongs to the server rather than the image belongs there. Anything you cannot
+> re-download in a minute should be baked into the overlay instead.
 
 ---
 
@@ -107,9 +122,10 @@ makes the engine load it**:
 }
 ```
 
-`data/left4dead2/addons/` is overwritten from the image on every start, so
-dropping both files straight in does **not** persist. Bake them into the
-overlay instead:
+Dropping both files straight into `data/left4dead2/addons/` persists across
+restarts — but only until the next install is replaced, at which point they go
+with everything else in `addons/`. Bake them into the overlay if the extension
+is meant to be permanent:
 
 ```bash
 podman compose cp ./mytoolz.so l4d2:/data/left4dead2/addons/
@@ -135,7 +151,14 @@ MetaMod's `linux64/` module — that is the source of the harmless
 | Campaign VPKs | `data/left4dead2/maps/` |
 
 Both directories are real and untouched by the overlay, so files land next to
-the stock content.
+the stock content and survive a game update.
+
+Workshop VPKs are conventionally dropped straight into
+`data/left4dead2/addons/`, because that is where the engine looks for mounted
+content and it is what the workshop tooling does. It works, and it survives
+restarts — but an install swap deletes it, silently, and the server boots
+without the campaign. If a map is worth more than a re-download, move it to
+`maps/` once you are happy with it.
 
 Two cvars matter for custom content, and the image already sets both:
 
@@ -189,9 +212,10 @@ podman compose restart l4d2
 podman compose logs l4d2 | grep -E '\[SM\]'      # empty = good
 ```
 
-That works until the next restart, because `addons/` comes from the image. To
-make it stick, either stage it in the overlay as above, or have the server load
-it from a directory the overlay does not touch:
+That works across restarts. It does **not** survive an install being replaced —
+a manifest change or a new volume — because everything in `addons/` goes then.
+To make it stick for good, either stage it in the overlay as above, or have the
+server load it from a directory the overlay does not touch:
 
 ```bash
 podman compose exec l4d2 mkdir -p /data/left4dead2/mods/mine

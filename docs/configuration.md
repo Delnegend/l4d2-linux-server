@@ -101,9 +101,13 @@ stock content rather than replacing it.
 
 ## SourceMod and MetaMod
 
-`data/left4dead2/addons/sourcemod` and `.../metamod` are **overwritten on every
-start** from the overlay the image carries, so a plugin installed straight into
-them is lost on restart. Installing a plugin needs one deliberate step first.
+`data/left4dead2/addons/sourcemod` and `.../metamod` are refreshed from the
+overlay the image carries on every start, so an image update does reach a volume
+that already has the right game build. Files you add under those names survive
+in the meantime — the copy overwrites same-named files and deletes nothing — but
+they are **not** durable: an install swap removes the whole of `addons/`,
+`left4dead2/cfg` being the only exception. Installing a plugin needs one
+deliberate step first.
 
 How to add a plugin, a MetaMod extension, or a custom map — and when a mod
 belongs in the image rather than on the volume — is in

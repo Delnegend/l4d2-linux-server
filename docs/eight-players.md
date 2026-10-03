@@ -61,9 +61,9 @@ echo 'sv_force_unreserved 0' >> data/left4dead2/cfg/server_custom.cfg
 ```
 
 The last value wins, so the appended line replaces the image's `1` with `0`.
-Dropping `l4dtoolz.so` and `l4dtoolz.vdf` from
-`data/left4dead2/addons/` also works, and the volume entry wins over the image's
-link.
+Deleting `l4dtoolz.so` and `l4dtoolz.vdf` from `data/left4dead2/addons/` does
+**not** work: the overlay is copied over `addons/` on every start and it carries
+both files. Use the cvar above.
 
 ## Getting players in is a client problem
 

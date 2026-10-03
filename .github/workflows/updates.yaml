@@ -10,8 +10,8 @@ name: Upstream updates
 # and nothing else.
 on:
   schedule:
-    # 02:17 UTC, off the top of the hour where every other cron lands.
-    - cron: "17 2 * * *"
+    # 02:00 UTC.
+    - cron: "0 2 * * *"
   workflow_dispatch:
 
 permissions:

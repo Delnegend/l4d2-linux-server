@@ -11,7 +11,7 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 
 | Variable | Default | Renders / does |
 |---|---|---|
-| `GAME_MANIFEST` | the image's `ARG` | Steam depot manifest id to install. Empty takes the one baked into the image. Setting it makes the next start of the volume download that build instead — see [maintenance.md](maintenance.md#updating-the-game). |
+| `GAME_MANIFEST` | the image's `ARG` | Steam depot manifest id to install. Empty uses the version baked into the image — see [maintenance.md](maintenance.md#updating-the-game). |
 | `VANILLA` | `false` | Run as a vanilla 4-player server without SourceMod/l4dtoolz (`true` or `false`). |
 | `PORT` | `27015` | `-port` |
 | `STEAM_PORT` | `26901` | `-sport` |
@@ -31,10 +31,8 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 > the password prompt hangs when `sv_allow_lobby_connect_only` is `0`, which is
 > what the template sets. The entrypoint logs a note when it is non-empty.
 
-`GAME_MANIFEST` is the one knob that changes what is on disk rather than how
-the server behaves. It deliberately has no default of its own: an empty `.env`
-leaves the image's value in force, so a compose file that never mentions it
-still gets a working server.
+`GAME_MANIFEST` is the build-time pin that specifies the game depot manifest.
+Leaving it empty in `.env` leaves the image's baked version in force.
 
 ## Config file precedence
 

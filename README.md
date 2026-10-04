@@ -1,144 +1,75 @@
-# Left 4 Dead 2 Linux Dedicated Server (Docker / Podman)
+<div align="center">
 
-A Left 4 Dead 2 dedicated server container that installs the game on the
-**first start of a volume** with
-[DepotDownloader](https://github.com/SteamRE/DepotDownloader), from a pinned
-Steam depot manifest. The image is 528 MB rather than 10 GB, and every restart
-after the first is instant.
+# Left 4 Dead 2 Dedicated Server
 
-Prebuilt images are published to `ghcr.io/delnegend/l4d2-linux-server`.
+**Production-ready Left 4 Dead 2 Linux dedicated server container with 8-player co-op support and instant boot times.**
 
----
+[![CI](https://img.shields.io/github/actions/workflow/status/Delnegend/l4d2-linux-server/ci.yaml?branch=main&style=flat-square)](https://github.com/Delnegend/l4d2-linux-server/actions)
+[![Release](https://img.shields.io/github/v/release/Delnegend/l4d2-linux-server?style=flat-square)](https://github.com/Delnegend/l4d2-linux-server/releases)
+[![License](https://img.shields.io/github/license/Delnegend/l4d2-linux-server?style=flat-square)](LICENSE)
 
-## The problem this solves
-
-Valve migrated the L4D2 dedicated server (App ID `222860`) to the newer
-`freetodownload` package structure, and an unpatched platform bug in SteamCMD on
-Linux makes an anonymous install fail outright:
-
-```text
-ERROR! Failed to install app '222860' (Invalid platform)
-```
-
-Server managers built on SteamCMD — LinuxGSM, most stock images — therefore
-either fail or demand personal Steam credentials with the game owned.
-DepotDownloader handles that API flow anonymously, which is why this image uses
-it.
+</div>
 
 ---
 
-## Quick start
+## Quick Start
+
+Get your server running in less than 60 seconds:
 
 ```bash
-git clone https://github.com/Delnegend/l4d2-linux-server.git
-cd l4d2-linux-server
+# 1. Download configuration
+curl -fsSL https://raw.githubusercontent.com/Delnegend/l4d2-linux-server/main/compose.yaml -o compose.yaml
 
-cp .env.example .env      # set at least RCON_PASSWORD
-
-podman compose pull
+# 2. Start the server
 podman compose up -d
+
+# 3. View startup logs
 podman compose logs -f
 ```
 
-That is the whole install: `compose.yaml` references the published image, so
-nothing is built on your machine. The first start downloads the game — about
-10 GB — so expect a multi-minute wait before `Self-check OK: server answers A2S
-queries` appears in the log. Every later start is instant.
+Look for `Self-check OK: server answers A2S queries` in the log to confirm the server is public and discoverable.
 
-## Configuration
+## Highlights
 
-Copy `.env.example` and change what you care about. The variables you are most
-likely to touch:
-| Variable | Default | Does |
+- **Instant startup** — The ~10 GB game install is baked into the base image layer, booting within seconds without runtime downloads.
+- **8-Player co-op out of the box** — Pre-configured with SourceMod, MetaMod, l4dtoolz, and the 5+ survivor plugin stack.
+- **Clean host storage** — Game files stay read-only in the image; your host volume only stores ~50 MB of configs, maps, and logs.
+- **Zero-config vanilla mode** — Set `VANILLA=true` in your environment to strip all mods and run a pure 4-player stock server.
+- **Unprivileged security** — Runs safely as standard non-root user `steam` (UID 1000) with automatic visibility self-checks.
+
+## Common Options
+
+Configure the server by passing environment variables in `.env` or your container manager:
+
+| Variable | Default | Description |
 |---|---|---|
-| `GAME_MANIFEST` | the image's value | Which Steam depot manifest to install. Set it to move to a new Valve build without a new image. |
-| `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
-| `RCON_PASSWORD` | `ChangeThisRcon123` | `rcon_password` — change it |
-| `DEFAULT_MAP` | `c1m1_hotel` | `+map` |
-| `STEAM_GROUP_ID` | `""` | Lists the server in that Steam group's server list |
-| `SERVER_PASSWORD` | `""` | `sv_password` — leave empty, it can hang the client prompt |
+| `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | Server display name in the browser |
+| `RCON_PASSWORD` | `ChangeThisRconPassword123` | Administrative remote console password |
+| `DEFAULT_MAP` | `c1m1_hotel` | Starting campaign map |
+| `VANILLA` | `false` | Run as stock 4-player vanilla server (`true`/`false`) |
+| `STEAM_GROUP_ID` | `""` | Steam Group ID to advertise server to members |
 
-**The full variable reference, config file precedence, custom map and campaign
-paths, and the cvars L4D2 does *not* have** are in
-[docs/configuration.md](docs/configuration.md).
+For the complete variable list, config file precedence, and custom maps, see **[Configuration Reference](docs/configuration.md)**.
 
-The player count is not an environment variable: the image always launches with
-`+maxplayers 8`, and the engine overwrites that itself. What actually limits a
-co-op campaign to four survivors is something else entirely — see
-[docs/eight-players.md](docs/eight-players.md).
+## Architecture
 
-## What you get
+```mermaid
+flowchart LR
+    Base[Base Image<br/>10 GB Game Baked] --> Server[Server Container<br/>Vanilla / 8-Player Mode]
+    Server --> Storage[(Host Volume /data<br/>Configs, Maps, Logs)]
+```
 
-- **A small image** — 528 MB instead of 10.3 GB, because Valve's 10 GB is not in
-  it. The install lands on the volume once, from a manifest you can pin per
-  deployment, and is reused from then on.
-- **No host dependencies** — the 32-bit runtime libraries are included; it runs
-  on Fedora CoreOS, Ubuntu, Debian, Arch and friends without multilib.
-- **SourceMod, MetaMod and l4dtoolz included** — staged in the image and applied
-  on every start, so an image update reaches a server whose volume already has
-  the game.
-- **Template-driven config** — `server.cfg` is regenerated from a template on
-  every start, so environment variables are the single source of truth, and
-  `server_custom.cfg` holds everything they don't cover.
-- **Misconfiguration guards** — the entrypoint refuses to start rather than run
-  a server that is invisible in the browser, and warns before discarding
-  hand-edits to `server.cfg`.
-- **Visibility self-check** — after boot it probes the running server over A2S
-  and says so loudly, because an undiscoverable server otherwise looks perfectly
-  healthy in the logs.
-- **Non-root** — runs as an unprivileged `steam` user, UID 1000.
+For build stages, layer caching strategy, and runtime symlink joining, see **[Architecture Guide](docs/architecture.md)**.
 
 ## Documentation
 
-- **[docs/architecture.md](docs/architecture.md)** — read it when you want to know
-  how the image is layered, how `/data` is joined to it, or what a build
-  argument does.
-- **[docs/configuration.md](docs/configuration.md)** — read it when you are
-  setting variables, editing configs, or adding maps and campaigns.
-- **[docs/eight-players.md](docs/eight-players.md)** — read it when you want more
-  than four survivors in a co-op campaign, or you are wondering what
-  `maxplayers` does.
-- **[docs/mods.md](docs/mods.md)** — read it when you are adding a plugin, a
-  MetaMod extension, or a custom map, and want to know whether it belongs on the
-  volume or in the image.
-- **[docs/troubleshooting.md](docs/troubleshooting.md)** — read it when the
-  server is not appearing in the browser, or you are reading a confusing boot
-  log.
-- **[docs/maintenance.md](docs/maintenance.md)** — read it when you are updating
-  the game, the mods, or publishing a release.
-
----
-
-## Building from source (advanced)
-
-You only need this if you are changing the image itself. A normal install is
-the prebuilt image above.
-
-```bash
-just            # list the available recipes
-just build      # build the image locally as localhost/l4d2:dev
-just up         # build, then run it with compose
-just smoke      # boot it on a scratch volume and wait for the A2S self-check
-just check      # validate the docs against the code
-```
-
-The build is a plain `podman build` with no `--target` needed, because
-`server` is the last stage:
-
-```bash
-podman build -t localhost/l4d2:dev .
-```
-
-`compose.yaml` points at the published image, so `just up` sets `L4D2_IMAGE` to
-the local tag. There is no `base` stage to build separately any more: the game
-is not in the image at all, so the build is 528 MB and takes about half a
-minute. `just smoke` then downloads the game onto a scratch volume and boots it.
-
-Requires [just](https://github.com/casey/just) and podman. See
-[docs/architecture.md](docs/architecture.md) for the build arguments and
-[docs/maintenance.md](docs/maintenance.md) for releasing.
+- **[Architecture](docs/architecture.md)** — Multi-stage build graph, cache optimization, and volume symlinking.
+- **[Configuration](docs/configuration.md)** — Environment variables, config precedence, and custom map setups.
+- **[8-Player Co-op](docs/eight-players.md)** — How l4dtoolz, left4dhooks, and survivor slots work.
+- **[Modding](docs/mods.md)** — Adding plugins, campaign VPKs, and volume persistence rules.
+- **[Troubleshooting](docs/troubleshooting.md)** — Diagnosing A2S discovery issues, rejected flags, and boot errors.
+- **[Maintenance](docs/maintenance.md)** — Upstream updates, image builds, and release workflows.
 
 ## License
 
-MIT License. Left 4 Dead 2 and Source Engine are trademarks and/or registered
-trademarks of Valve Corporation.
+[MIT](LICENSE)

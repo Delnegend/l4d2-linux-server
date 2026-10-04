@@ -182,9 +182,6 @@ contain. The consequence is the one worth stating plainly: `:latest` and
 deployments on the same tag are only on the same game build if they agree on
 `GAME_MANIFEST`. Set it explicitly if that matters to you.
 
-A publish is under a minute from a cold cache, because there is no 10 GB in
-the build.
-
 To push a locally built image with the same compression:
 
 ```bash
@@ -193,26 +190,20 @@ L4D2_VERSION=1.0.3 just push
 
 ## Cache behaviour
 
-The image has nothing to invalidate. `podman build` caches on the mod overlay and
-the entrypoint, so a rebuild after a change to `entrypoint.sh` or
-`server.cfg.template` costs seconds. Changing `APP_ID`, `GAME_DEPOT`,
-`GAME_MANIFEST`, `DEPOT_DOWNLOADER_VERSION`, `MAX_DOWNLOADS` or `SOURCEMOD_BRANCH`
-invalidates only the stage that uses it.
-
-The volume is the other cache, and the more important one: it holds the install,
-so restarts are instant and only the first start pays. `just smoke` has no such
-cache — it runs on a scratch volume — so it downloads ~10 GB every time.
+The multi-stage build is heavily optimized for Docker layer caching:
+- The `fetch` stage downloads the pinned game depots using a BuildKit cache mount.
+- The `base` stage copies `/opt/l4d2` and installs runtime libraries. Because it does not contain entrypoint scripts or configuration files, this ~10 GB layer remains permanently cached.
+- The `mods` stage downloads and stages plugins independently into `/opt/l4d2-overlay`.
+- Rebuilding after a change to `entrypoint.sh` or `server.cfg.template` takes under a second because neither `base` nor `mods` needs to re-run.
 
 ## Post-update checks
 
 After moving to a new game build, before pointing players at it:
 
-1. `just smoke` boots the image on a scratch volume — which means it downloads
-   the pinned manifests first — waits for
+1. `just smoke` boots the image on a scratch volume, waits for
    `Self-check OK: server answers A2S queries`, checks the 5+ plugin stack
    loaded, and fails on any new `Unknown command` line beyond the known
-   engine-internal one (`mat_bloom_scalefactor_scalar`). About three minutes
-   end to end here, most of it the 9.5 GB download.
+   engine-internal one (`mat_bloom_scalefactor_scalar`).
 2. Join with one client and confirm the map loads and the server answers A2S.
    The self-check only proves the query layer; it does not prove the campaign
    scripts still run.
@@ -224,20 +215,9 @@ After moving to a new game build, before pointing players at it:
 Step 1 is what the daily update workflow runs for you, in CI, before it merges.
 Steps 2 and 3 are the ones that need a human.
 
-## Why the download happens at run time
+## Why the game is baked in
 
-The alternative is to bake the install into the image. That costs a 10.3 GB
-pull for every deployment and an 8-minute build for every release, so a routine
-Valve patch becomes an infrastructure event, and reconciling a read-only
-install with a writable volume needs a farm of symlinks.
-
-Downloading at run time puts the cost where it belongs: once per volume, on the
-machine that is going to run the server, against a manifest that names exactly
-one set of files. The image is 528 MB, a release takes under a minute, and
-moving to a new Valve build is an `.env` edit.
-
-What it costs, stated plainly: a fresh volume pays a multi-minute download
-before the server answers anything, and the install is now volume state, so two
-volumes can hold different game builds. Both are visible and both are intended —
-`just logs` shows the download, and `.l4d2-manifest` in the volume names
-exactly what is installed.
+Baking the game install into the `base` image layer removes the 10-minute download
+on first boot, ensures byte-identical reproducibility across all servers, and keeps
+host volumes tiny (~50 MB for configs, maps, and logs) without risk of data
+corruption or leftover mod files.

@@ -89,24 +89,19 @@ Lines that matter:
 
 ## The volume is not what you expect
 
-`data/` is about 11 GB, and that is correct: the install is on the volume. It
-was downloaded on the first start and is reused from then on.
+`data/` is about 50 MB, and that is correct: the ~10 GB game install is baked
+into the image at `/opt/l4d2`. On startup, `mirror_tree` creates shallow symlinks
+from `/opt/l4d2` into `data/`, so the host volume only holds real directories for
+your persistent configs (`cfg/`), custom maps (`maps/`), custom scripts
+(`scripts/`), and logs.
 
 ```bash
 du -sh data/
-cat data/left4dead2/.l4d2-manifest   # the depot manifests this install came from
+ls -l data/srcds_run   # symlink pointing to /opt/l4d2/srcds_run
 ```
 
-If the volume is much smaller than that, the download did not finish. Watch it
-with `just logs`; the entrypoint logs the two depots and their manifests before
-it starts, and prints `Install ready:` only once both are in place.
-
-If `data/` is empty and the log shows a download starting on every restart, the
-entrypoint is replacing the install each time — which it only does when
-`.l4d2-manifest` does not match `GAME_MANIFEST`. The usual cause is
-`GAME_MANIFEST` set differently on two starts; see
-[maintenance.md](maintenance.md#updating-the-game).
-
+If `data/` is missing files or `srcds_run` fails to launch, check that `data/`
+is a writable directory owned or writable by UID 1000 (`steam`).
 ## Players cannot see more than four slots
 
 That is a client-side limit, not a server one. See

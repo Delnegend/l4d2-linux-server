@@ -26,6 +26,7 @@ services:
       - STEAM_GROUP_EXCLUSIVE=${STEAM_GROUP_EXCLUSIVE:-0}
       - SV_CONSISTENCY=${SV_CONSISTENCY:-0}
       - SV_PURE=${SV_PURE:-0}
+      - ADMIN_USERS=${ADMIN_USERS:-}
       - EXTRA_ARGS=${EXTRA_ARGS:-}
       # GAME_MANIFEST is deliberately absent here: an empty interpolation
       # default would override the value the image bakes in. The image's ARG

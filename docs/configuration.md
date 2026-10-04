@@ -23,7 +23,16 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 | `STEAM_GROUP_EXCLUSIVE` | `0` | `sv_steamgroup_exclusive`. `1` hides the server until a player joins it from a lobby. |
 | `SV_CONSISTENCY` | `0` | `sv_consistency`. Must stay `0` for more than four survivors. |
 | `SV_PURE` | `0` | `sv_pure` |
+| `ADMIN_USERS` | `""` | Comma-separated SteamIDs granted root admin in SourceMod (e.g. `STEAM_1:0:12345678, 76561198012345678`). |
 | `EXTRA_ARGS` | `""` | Appended to the `srcds_run` command line. Certain flags are rejected at startup — see [troubleshooting.md](troubleshooting.md#rejected-flags). |
+
+### Admin users
+
+`ADMIN_USERS` populates `addons/sourcemod/configs/admins_simple.ini` on startup:
+- Supports Steam2 (`STEAM_1:0:12345678`), Steam64 (`76561198012345678`), and Steam3 (`[U:1:12345678]`).
+- Grants full root admin access (`99:z`) by default.
+- Custom flags can be passed per user with `@flags` (e.g. `STEAM_1:0:12345678@bce`).
+- When `VANILLA=true`, admin setup is skipped since SourceMod is not loaded.
 
 **Player count is governed by the mode.** The image launches with `+maxplayers 8` by default, or `+maxplayers 4` when `VANILLA=true`; see [eight-players.md](eight-players.md).
 

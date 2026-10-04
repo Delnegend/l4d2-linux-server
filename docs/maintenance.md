@@ -194,7 +194,7 @@ The multi-stage build is heavily optimized for Docker layer caching:
 - The `fetch` stage downloads the pinned game depots using a BuildKit cache mount.
 - The `base` stage copies `/opt/l4d2` and installs runtime libraries. Because it does not contain entrypoint scripts or configuration files, this ~10 GB layer remains permanently cached.
 - The `mods` stage downloads and stages plugins independently into `/opt/l4d2-overlay`.
-- Rebuilding after a change to `entrypoint.sh` or `server.cfg.template` takes under a second because neither `base` nor `mods` needs to re-run.
+- Rebuilding after a change to `entrypoint.py` or `server.cfg.template` takes under a second because neither `base` nor `mods` needs to re-run.
 
 ## Post-update checks
 

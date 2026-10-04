@@ -107,6 +107,7 @@ RUN dpkg --add-architecture i386 && \
         libc6:i386 \
         libcurl4-gnutls-dev:i386 \
         locales \
+        python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # The steam user is created *before* the install lands, so the COPY can set
@@ -215,14 +216,14 @@ LABEL org.opencontainers.image.version="${SERVER_VERSION}"
 
 USER root
 
-COPY entrypoint.sh /entrypoint.sh
+COPY entrypoint.py /entrypoint.py
 COPY server.cfg.template /defaults/server.cfg.template
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.py
 
 USER steam
 WORKDIR /data
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.py"]
 
 # ===========================================================================
 # server - vanilla + 8-player mod overlay (published default image)
@@ -242,4 +243,4 @@ COPY server_custom.cfg /defaults/server_custom.cfg
 USER steam
 WORKDIR /data
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.py"]

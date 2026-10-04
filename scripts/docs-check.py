@@ -73,7 +73,7 @@ for path in DOCS:
 # ---------------------------------------------------------------------------
 # 2. The environment variable table is .env.example, and the entrypoint reads it
 # ---------------------------------------------------------------------------
-entrypoint = read(ROOT / "entrypoint.sh")
+entrypoint = read(ROOT / "entrypoint.py")
 envexample = set(re.findall(r"^([A-Z_]+)=", read(ROOT / ".env.example"), re.M))
 config_doc = read(ROOT / "docs/configuration.md")
 documented = set(re.findall(r"^\| `([A-Z_]+)` \|", config_doc, re.M))
@@ -84,7 +84,7 @@ for var in sorted(documented - envexample):
     fail(f"docs/configuration.md: {var} is documented but not in .env.example")
 for var in sorted(documented):
     if var not in entrypoint:
-        fail(f"docs/configuration.md: {var} is documented but entrypoint.sh never reads it")
+        fail(f"docs/configuration.md: {var} is documented but entrypoint.py never reads it")
 
 # ---------------------------------------------------------------------------
 # 3. Targets: every --target and stage name in the docs exists in the Dockerfile

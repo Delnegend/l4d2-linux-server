@@ -40,7 +40,7 @@ smoke_dir := env_var_or_default("L4D2_SMOKE_DIR", ".smoke")
 # Build arguments. Anything here can be overridden from the environment, e.g.
 #   SOURCEMOD_BRANCH=1.13 just build
 build_args := "--build-arg SERVER_VERSION=" + version + " --build-arg MAX_DOWNLOADS=" + env_var_or_default("MAX_DOWNLOADS", "16") + " --build-arg SOURCEMOD_BRANCH=" + env_var_or_default("SOURCEMOD_BRANCH", "1.12")
-
+extra_build_args := env_var_or_default("EXTRA_BUILD_ARGS", "")
 # List the available recipes.
 default:
     @just --list --unsorted
@@ -56,11 +56,11 @@ config:
 
 # Build the image: one target, and it is the last stage.
 build:
-    {{engine}} build {{build_args}} -t {{local_tag}} .
+    {{engine}} build {{build_args}} {{extra_build_args}} -t {{local_tag}} .
 
 # Build the vanilla 4-player server without mods.
 build-vanilla:
-    {{engine}} build --target vanilla {{build_args}} -t localhost/l4d2:vanilla .
+    {{engine}} build --target vanilla {{build_args}} {{extra_build_args}} -t localhost/l4d2:vanilla .
 
 # Run the locally built image with compose, recreating the container.
 up: build

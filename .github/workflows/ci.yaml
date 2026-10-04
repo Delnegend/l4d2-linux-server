@@ -9,10 +9,14 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/delnegend/l4d2-linux-server
 
 jobs:
   verify:
@@ -30,15 +34,19 @@ jobs:
       - name: Set up just
         uses: extractions/setup-just@v4
 
-      # The image carries no game files, so the build is ~440 MB and finishes in
-      # about a minute. The 10 GB install happens inside `just smoke`, onto the
-      # runner's own disk, which is the one cost this design does not remove.
-      #
-      # CONTAINER_ENGINE=docker because the runner's engine is docker: rootless
-      # podman there would need uid mappings the image does not configure. The
-      # justfile chowns the scratch volume to 1000 to match.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Docs check, install, A2S self-check, plugin stack
         run: just verify
         env:
           CONTAINER_ENGINE: docker
+          EXTRA_BUILD_ARGS: --cache-from type=registry,ref=${{ env.IMAGE }}:buildcache --load
           L4D2_SMOKE_DIR: ${{ github.workspace }}/.smoke

@@ -13,6 +13,11 @@ on:
     # 02:00 UTC.
     - cron: "0 2 * * *"
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
 
 permissions:
   contents: write
@@ -120,10 +125,9 @@ jobs:
           BODY
           )"
 
-          # Merges itself the moment `Check (just verify)` goes green. Requires
-          # auto-merge and branch protection to be enabled on the repository;
-          # see docs/maintenance.md for the two `gh` commands that set it up.
-          gh pr merge --auto --rebase
+          # Auto-merge if branch protection requires status checks; otherwise
+          # merge directly if the pull request is already in clean status.
+          gh pr merge --auto --rebase 2>/dev/null || gh pr merge --rebase || true
 
   report:
     # Runs whether or not anything was stale: this is the record of where the

@@ -35,7 +35,7 @@ So:
   surviving restarts.
 - **A custom plugin or file in `addons/` sticks across restarts too.**
   The entrypoint symlinks the image's mod overlay without deleting existing
-  volume files. If you run in `VANILLA=true` mode, image overlay symlinks are
+  volume files. If you run in `SERVER_MODE=vanilla` mode, image overlay symlinks are
   temporarily unlinked, leaving your custom volume files intact.
 
 `cfg/` is seeded with no-clobber rather than overwritten, because

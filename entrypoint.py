@@ -27,6 +27,16 @@ WRITABLE_DIRS = ["cfg", "addons", "maps", "scripts"]
 WRITABLE_GAME_FILES = ["motd.txt", "mapcycle.txt", "missioncycle.txt", "maplist.txt"]
 WRITABLE_DATA_FILES = ["console.log"]
 
+EIGHT_PLAYER_FILES = {
+    "l4dtoolz.so",
+    "l4dtoolz.vdf",
+    "l4dmultislots.smx",
+    "l4d_CreateSurvivorBot.smx",
+    "l4d_unreservelobby.smx",
+    "l4d_CreateSurvivorBot.txt",
+    "l4dmultislots.phrases.txt",
+}
+
 DEFAULT_CONFIG_VALUES = {
     "SERVER_NAME": "Left 4 Dead 2 Dedicated Server",
     "RCON_PASSWORD": "ChangeMeRcon123",
@@ -245,17 +255,42 @@ def setup_game_files(game_dir: Path, data_dir: Path) -> Path:
     return game_data_dir
 
 
+def link_overlay_tree(
+    src: Path, dst: Path, exclude_names: set[str] | None = None
+) -> None:
+    """Recursively link overlay files from src to dst.
+
+    Creates subdirectories in dst and symlinks individual files.
+    Skips any entry whose filename is in exclude_names.
+    """
+    if exclude_names is None:
+        exclude_names = set()
+    dst.mkdir(parents=True, exist_ok=True)
+    for entry in src.iterdir():
+        if entry.name in exclude_names:
+            continue
+        target = dst / entry.name
+        if entry.is_dir() and not entry.is_symlink():
+            link_overlay_tree(entry, target, exclude_names)
+        else:
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            target.symlink_to(entry)
+
+
 def setup_mods(
-    vanilla: bool,
+    server_mode: str,
     overlay_dir: Path,
     game_data_dir: Path,
     admin_users: str,
 ) -> None:
-    if vanilla:
-        log("VANILLA mode enabled: running pure 4-player server without mods.")
-        addons_dir = game_data_dir / "addons"
+    addons_dir = game_data_dir / "addons"
+    overlay_addons = overlay_dir / "left4dead2" / "addons"
+    overlay_prefix = str(overlay_dir)
+
+    if server_mode == "vanilla":
+        log("SERVER_MODE is 'vanilla': running pure 4-player server without mods.")
         if addons_dir.is_dir():
-            overlay_prefix = str(overlay_dir)
             for item in list(addons_dir.rglob("*")):
                 if item.is_symlink():
                     target = os.path.realpath(item)
@@ -263,30 +298,39 @@ def setup_mods(
                         item.unlink()
         return
 
-    overlay_addons = overlay_dir / "left4dead2" / "addons"
-    if overlay_addons.is_dir():
-        log(f"Applying mod stack from {overlay_dir}...")
-        (game_data_dir / "addons").mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["cp", "-asf", f"{overlay_addons}/.", f"{game_data_dir}/addons/"],
-            check=True,
+    if server_mode == "sourcemod":
+        log(
+            "SERVER_MODE is 'sourcemod': running 4-player server with SourceMod and admin tools."
         )
-
-    overlay_cfg = overlay_dir / "left4dead2" / "cfg"
-    if overlay_cfg.is_dir():
-        sm_cfg = game_data_dir / "cfg" / "sourcemod"
-        sm_cfg.mkdir(parents=True, exist_ok=True)
-        src_multislots = overlay_cfg / "sourcemod" / "l4dmultislots.cfg"
-        dst_multislots = sm_cfg / "l4dmultislots.cfg"
-        if src_multislots.is_file() and not dst_multislots.exists():
-            shutil.copy2(src_multislots, dst_multislots)
+        # Clean up any 8-player symlinks from a previous run
+        if addons_dir.is_dir():
+            for item in list(addons_dir.rglob("*")):
+                if item.is_symlink() and item.name in EIGHT_PLAYER_FILES:
+                    target = os.path.realpath(item)
+                    if target.startswith(overlay_prefix):
+                        item.unlink()
+        if overlay_addons.is_dir():
+            link_overlay_tree(
+                overlay_addons, addons_dir, exclude_names=EIGHT_PLAYER_FILES
+            )
+    elif server_mode == "8players":
+        log("SERVER_MODE is '8players': running 8-player server with full mod stack.")
+        if overlay_addons.is_dir():
+            link_overlay_tree(overlay_addons, addons_dir)
+        overlay_cfg = overlay_dir / "left4dead2" / "cfg"
+        if overlay_cfg.is_dir():
+            sm_cfg = game_data_dir / "cfg" / "sourcemod"
+            sm_cfg.mkdir(parents=True, exist_ok=True)
+            src_multislots = overlay_cfg / "sourcemod" / "l4dmultislots.cfg"
+            dst_multislots = sm_cfg / "l4dmultislots.cfg"
+            if src_multislots.is_file() and not dst_multislots.exists():
+                shutil.copy2(src_multislots, dst_multislots)
 
     if admin_users:
         configure_admins(
             admin_users,
             game_data_dir / "addons" / "sourcemod" / "configs" / "admins_simple.ini",
         )
-
 
 def configure_admins(admin_users: str, config_path: Path) -> None:
     log("Configuring SourceMod admins from ADMIN_USERS...")
@@ -318,7 +362,7 @@ def configure_admins(admin_users: str, config_path: Path) -> None:
 
 def setup_config(
     game_data_dir: Path,
-    vanilla: bool,
+    server_mode: str,
     server_password: str,
 ) -> None:
     cfg_dir = game_data_dir / "cfg"
@@ -357,11 +401,14 @@ def setup_config(
 
     override_sources: list[Path] = []
     default_custom = Path("/defaults/server_custom.cfg")
-    if not vanilla and default_custom.is_file() and default_custom.stat().st_size > 0:
+    if (
+        server_mode == "8players"
+        and default_custom.is_file()
+        and default_custom.stat().st_size > 0
+    ):
         override_sources.append(default_custom)
     if custom_cfg.is_file() and custom_cfg.stat().st_size > 0:
         override_sources.append(custom_cfg)
-
     for overrides in override_sources:
         log(f"Appending persistent overrides from {overrides}...")
         content = overrides.read_text(encoding="utf-8")
@@ -417,12 +464,22 @@ def main() -> None:
             os.environ[key] = val
 
     game_manifest = os.environ.get("GAME_MANIFEST", "")
-    vanilla_raw = os.environ.get("VANILLA", "false").lower()
-    vanilla = vanilla_raw in ("true", "1", "yes")
+    # Mode: 8players (default), sourcemod (4-player with admin tools), vanilla (pure 4-player)
+    server_mode = os.environ.get("SERVER_MODE", "8players").strip().lower()
 
-    default_players = "4" if vanilla else "8"
+    if server_mode not in ("8players", "sourcemod", "vanilla"):
+        fail(
+            f"Invalid SERVER_MODE: '{server_mode}'.",
+            "",
+            "Valid options:",
+            "  - '8players'  : 8-player co-op with full mod stack (default)",
+            "  - 'sourcemod' : 4-player server with SourceMod and admin tools",
+            "  - 'vanilla'   : pure 4-player vanilla server without mods",
+        )
+
+    os.environ["SERVER_MODE"] = server_mode
+    default_players = "8" if server_mode == "8players" else "4"
     max_players = os.environ.get("MAX_PLAYERS", default_players)
-
     port = os.environ.get("PORT", "27015")
     steam_port = os.environ.get("STEAM_PORT", "26901")
     default_map = os.environ.get("DEFAULT_MAP", "c1m1_hotel")
@@ -484,7 +541,7 @@ def main() -> None:
     game_data_dir = setup_game_files(GAME_DIR, DATA_DIR)
 
     # Mod stack
-    setup_mods(vanilla, OVERLAY_DIR, game_data_dir, admin_users)
+    setup_mods(server_mode, OVERLAY_DIR, game_data_dir, admin_users)
 
     # Check executable
     srcds_run = DATA_DIR / "srcds_run"
@@ -495,15 +552,15 @@ def main() -> None:
             f"Check that {DATA_DIR} is a writable volume and that nothing in it",
             "shadows the image install.",
         )
-
     # Configuration files
-    setup_config(game_data_dir, vanilla, server_password)
+    setup_config(game_data_dir, server_mode, server_password)
 
     # Launch
     print("==================================================")
     print(f" Starting SRCDS on Port {port}, Map {default_map} ")
     print("==================================================")
-    log(f"Players: {max_players} (VANILLA={str(vanilla).lower()})")
+    log(f"Mode: {server_mode}")
+    log(f"Players: {max_players} (SERVER_MODE={server_mode})")
     log(
         f"Steam group: {steam_group_id if steam_group_id else '<none>'} (exclusive: {steam_group_exclusive})"
     )

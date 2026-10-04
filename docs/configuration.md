@@ -12,7 +12,7 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 | Variable | Default | Renders / does |
 |---|---|---|
 | `GAME_MANIFEST` | the image's `ARG` | Steam depot manifest id to install. Empty uses the version baked into the image — see [maintenance.md](maintenance.md#updating-the-game). |
-| `VANILLA` | `false` | Run as a vanilla 4-player server without SourceMod/l4dtoolz (`true` or `false`). |
+| `SERVER_MODE` | `8players` | Mode: `8players` (default 8-player co-op), `sourcemod` (4-player with admin tools), or `vanilla` (pure 4-player). |
 | `PORT` | `27015` | `-port` |
 | `STEAM_PORT` | `26901` | `-sport` |
 | `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | `hostname` |
@@ -32,9 +32,9 @@ Copy `.env.example` to `.env` and edit it. Compose passes each of these through.
 - Supports Steam2 (`STEAM_1:0:12345678`), Steam64 (`76561198012345678`), and Steam3 (`[U:1:12345678]`).
 - Grants full root admin access (`99:z`) by default.
 - Custom flags can be passed per user with `@flags` (e.g. `STEAM_1:0:12345678@bce`).
-- When `VANILLA=true`, admin setup is skipped since SourceMod is not loaded.
+- When running in `vanilla` mode, admin setup is skipped since SourceMod is not loaded.
 
-**Player count is governed by the mode.** The image launches with `+maxplayers 8` by default, or `+maxplayers 4` when `VANILLA=true`; see [eight-players.md](eight-players.md).
+**Player count is governed by the mode.** The image launches with `+maxplayers 8` in `8players` mode, or `+maxplayers 4` in `sourcemod` and `vanilla` modes; see [eight-players.md](eight-players.md).
 
 > **`SERVER_PASSWORD` is best left empty.** L4D2 has a long-standing bug where
 > the password prompt hangs when `sv_allow_lobby_connect_only` is `0`, which is

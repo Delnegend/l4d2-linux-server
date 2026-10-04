@@ -37,11 +37,11 @@ Docker layer caching is optimized by separating concerns into independent stages
 
 ### The mod overlay
 
-Our `addons/` and `cfg/` are staged in the image at `/opt/l4d2-overlay`, mirroring the `left4dead2/` layout. When the server boots (and `VANILLA` is not `true`), the entrypoint links the mod stack into the server directory:
+Our `addons/` and `cfg/` are staged in the image at `/opt/l4d2-overlay`, mirroring the `left4dead2/` layout. When the server boots (and `SERVER_MODE` is not `vanilla`), the entrypoint links the mod stack into the server directory:
 
 | Directory | Rule | Why |
 |---|---|---|
-| `addons/` | linked from image overlay | MetaMod, SourceMod, l4dtoolz and the 5+ plugins are ours. When `VANILLA=true`, these links are removed so the server is 100% vanilla. |
+| `addons/` | linked from image overlay | MetaMod, SourceMod, l4dtoolz and the 5+ plugins are ours. When `SERVER_MODE=vanilla`, these links are removed so the server is 100% vanilla. |
 | `cfg/` | **no-clobber** | `server_custom.cfg`, `sourcemod.cfg` and `l4dmultislots.cfg` are yours. A seed that only fills in what is missing cannot overwrite a tuned file. |
 
 ### Layer sizes (measured)

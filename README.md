@@ -34,7 +34,7 @@ Look for `Self-check OK: server answers A2S queries` in the log to confirm the s
 - **Instant startup** — The ~10 GB game install is baked into the base image layer, booting within seconds without runtime downloads.
 - **8-Player co-op out of the box** — Pre-configured with SourceMod, MetaMod, l4dtoolz, and the 5+ survivor plugin stack.
 - **Clean host storage** — Game files stay read-only in the image; your host volume only stores ~50 MB of configs, maps, and logs.
-- **Zero-config vanilla mode** — Set `VANILLA=true` in your environment to strip all mods and run a pure 4-player stock server.
+- **Flexible server modes** — Set `SERVER_MODE` to `8players` (default), `sourcemod` (4-player with admin tools), or `vanilla` (pure 4-player stock server).
 - **Unprivileged security** — Runs safely as standard non-root user `steam` (UID 1000) with automatic visibility self-checks.
 
 ## Common Options
@@ -46,7 +46,7 @@ Configure the server by passing environment variables in `.env` or your containe
 | `SERVER_NAME` | `Left 4 Dead 2 Dedicated Server` | Server display name in the browser |
 | `RCON_PASSWORD` | `ChangeThisRconPassword123` | Administrative remote console password |
 | `DEFAULT_MAP` | `c1m1_hotel` | Starting campaign map |
-| `VANILLA` | `false` | Run as stock 4-player vanilla server (`true`/`false`) |
+| `SERVER_MODE` | `8players` | Server mode: `8players`, `sourcemod`, or `vanilla` |
 | `STEAM_GROUP_ID` | `""` | Steam Group ID to advertise server to members |
 
 For the complete variable list, config file precedence, and custom maps, see **[Configuration Reference](docs/configuration.md)**.

@@ -15,3 +15,6 @@ updates:
       prefix: "chore(deps)"
     assignees:
       - "Delnegend"
+    # Supply chain security: quarantine newly published versions for 14 days
+    cooldown:
+      default-days: 14

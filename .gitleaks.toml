@@ -1,0 +1,17 @@
+# Gitleaks configuration.
+#
+# The `generic-api-key` rule matches a `*_PASSWORD=` line followed by any other
+# assignment, which is what a commented example env file looks like. The values
+# below are placeholders, not credentials — allow those exact lines rather than
+# the whole file, so a real secret added there is still caught.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Placeholder credentials in the example env file"
+regexTarget = "line"
+regexes = [
+  '''RCON_PASSWORD=ChangeThisRconPassword123''',
+  '''SERVER_PASSWORD=''',
+  '''DEFAULT_MAP=c1m1_hotel''',
+]

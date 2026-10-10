@@ -37,6 +37,7 @@ import pathlib
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -56,15 +57,35 @@ L4DTOOLZ_ASSET = re.compile(r"^l4dtoolz-(?P<version>.+?)-(?P<build>\d+)\.zip$")
 
 TIMEOUT = 30
 
+# The only hosts this check may reach. A branch name from the Dockerfile ends up
+# in these paths, so the host is checked after parsing — not by substring — and
+# the token is attached to api.github.com alone. A substring test would hand the
+# token to any host that merely had "api.github.com" somewhere in the URL.
+ALLOWED_HOSTS = {
+    "api.github.com",
+    "api.steamcmd.net",
+    "mms.alliedmods.net",
+    "sm.alliedmods.net",
+}
+
 
 def fetch(url: str) -> str:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname not in ALLOWED_HOSTS:
+        raise SystemExit(f"resolve-upstream: refusing to fetch {url}")
+
     request = urllib.request.Request(
         url, headers={"User-Agent": "l4d2-linux-server-upstream-check"}
     )
     token = os.environ.get("GITHUB_TOKEN")
-    if token and "api.github.com" in url:
+    if token and parsed.hostname == "api.github.com":
         request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+    # The URL was parsed and checked against ALLOWED_HOSTS on the line above, so
+    # a file:// or off-list host cannot reach this call; the rule cannot see that
+    # check, which is the only reason it is suppressed.
+    with urllib.request.urlopen(  # nosemgrep
+        request, timeout=TIMEOUT
+    ) as response:
         return response.read().decode("utf-8", "replace").strip()
 
 

@@ -6,10 +6,10 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # Where the published image lives, and the local tag development builds use.
-image := env_var_or_default("L4D2_IMAGE", "ghcr.io/delnegend/l4d2-linux-server")
+image := env_var_or_default("L4D2_IMAGE", "ghcr.io/delnegend/l4d2-server-container")
 version := env_var_or_default("L4D2_VERSION", "dev")
 local_tag := "localhost/l4d2:" + version
-registry := env_var_or_default("L4D2_REGISTRY", "ghcr.io/delnegend/l4d2-linux-server")
+registry := env_var_or_default("L4D2_REGISTRY", "ghcr.io/delnegend/l4d2-server-container")
 
 # Registry blobs are zstd level 4. Consumers need a runtime that understands
 # zstd layers (containerd 1.7+, Docker 20.10+, podman 3+); set

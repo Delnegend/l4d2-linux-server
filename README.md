@@ -4,9 +4,9 @@
 
 **Production-ready Left 4 Dead 2 Linux dedicated server container with 8-player co-op support and instant boot times.**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Delnegend/l4d2-linux-server/ci.yaml?branch=main&style=flat-square)](https://github.com/Delnegend/l4d2-linux-server/actions)
-[![Release](https://img.shields.io/github/v/release/Delnegend/l4d2-linux-server?style=flat-square)](https://github.com/Delnegend/l4d2-linux-server/releases)
-[![License](https://img.shields.io/github/license/Delnegend/l4d2-linux-server?style=flat-square)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Delnegend/l4d2-server-container/ci.yaml?branch=main&style=flat-square)](https://github.com/Delnegend/l4d2-server-container/actions)
+[![Release](https://img.shields.io/github/v/release/Delnegend/l4d2-server-container?style=flat-square)](https://github.com/Delnegend/l4d2-server-container/releases)
+[![License](https://img.shields.io/github/license/Delnegend/l4d2-server-container?style=flat-square)](LICENSE)
 
 </div>
 
@@ -18,7 +18,7 @@ Get your server running in less than 60 seconds:
 
 ```bash
 # 1. Download configuration
-curl -fsSL https://raw.githubusercontent.com/Delnegend/l4d2-linux-server/main/compose.yaml -o compose.yaml
+curl -fsSL https://raw.githubusercontent.com/Delnegend/l4d2-server-container/main/compose.yaml -o compose.yaml
 
 # 2. Start the server
 podman compose up -d

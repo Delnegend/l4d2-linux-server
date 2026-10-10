@@ -4,7 +4,7 @@
 # picks it up.
 services:
   l4d2:
-    image: ${L4D2_IMAGE:-ghcr.io/delnegend/l4d2-linux-server:latest}
+    image: ${L4D2_IMAGE:-ghcr.io/delnegend/l4d2-server-container:latest}
     container_name: l4d2-server
     restart: unless-stopped
     # host networking avoids UDP NAT overhead and allows local LAN discovery

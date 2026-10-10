@@ -58,10 +58,10 @@ env:
   # A literal, lowercase, with no expressions. `${{ github.repository }}`
   # expands to `Delnegend/...`, and buildx rejects a mixed-case image
   # reference before it builds anything:
-  #   invalid tag "ghcr.io/Delnegend/l4d2-linux-server:1.1.0":
+  #   invalid tag "ghcr.io/Delnegend/l4d2-server-container:1.1.0":
   #   repository name must be lowercase
   # `just check` enforces both halves of that rule.
-  IMAGE: ghcr.io/delnegend/l4d2-linux-server
+  IMAGE: ghcr.io/delnegend/l4d2-server-container
 
 jobs:
   prepare:

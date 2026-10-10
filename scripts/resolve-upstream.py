@@ -75,7 +75,7 @@ def fetch(url: str) -> str:
         raise SystemExit(f"resolve-upstream: refusing to fetch {url}")
 
     request = urllib.request.Request(
-        url, headers={"User-Agent": "l4d2-linux-server-upstream-check"}
+        url, headers={"User-Agent": "l4d2-server-container-upstream-check"}
     )
     token = os.environ.get("GITHUB_TOKEN")
     if token and parsed.hostname == "api.github.com":

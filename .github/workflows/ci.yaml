@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/delnegend/l4d2-linux-server
+  IMAGE: ghcr.io/delnegend/l4d2-server-container
 
 jobs:
   verify:

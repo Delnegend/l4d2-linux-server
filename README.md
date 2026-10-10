@@ -2,7 +2,7 @@
 
 # Left 4 Dead 2 Dedicated Server
 
-**Production-ready Left 4 Dead 2 Linux dedicated server container with 8-player co-op support and instant boot times.**
+**Left 4 Dead 2 Linux dedicated server container with 8-player co-op support and instant boot times.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Delnegend/l4d2-server-container/ci.yaml?branch=main&style=flat-square)](https://github.com/Delnegend/l4d2-server-container/actions)
 [![Release](https://img.shields.io/github/v/release/Delnegend/l4d2-server-container?style=flat-square)](https://github.com/Delnegend/l4d2-server-container/releases)

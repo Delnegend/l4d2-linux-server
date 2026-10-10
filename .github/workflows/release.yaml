@@ -1,4 +1,4 @@
-name: Release
+name: Release / Build Artifacts
 
 # One image, one version, decided by the commit history rather than by anyone
 # typing a number.
@@ -12,17 +12,39 @@ name: Release
 #   everything else                 -> no bump, so nothing is released
 #
 # The version is automatic; the timing is not. Shipping an image is a
-# deliberate act, so this runs only when dispatched from Actions.
+# deliberate act, and the weekly cron below is the only thing that presses the
+# button without a human. The run has three targets, all reachable from
+# Actions -> Run workflow:
 #
-# `build` is in the patch list because this repository uses `build:` for
+#   new-tag (default)  gate on CI, bump the version, tag & push, then build
+#   tag                rebuild an existing tag and publish its release
+#   commit             test build the latest commit; load the image only
+#
+# `build:` is in the patch list because this repository uses `build:` for
 # changes that ship inside the image (Dockerfile, mod stack, overlay). It
 # would otherwise produce no version, and an image change would go out under
 # the previous tag.
 
 on:
-  # No inputs. There is deliberately no version field: the number comes from
-  # the commits, so there is nothing to type and nothing to get wrong.
+  # No version field: the number comes from the commits, so there is nothing
+  # to type and nothing to get wrong.
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Release mode / build target"
+        required: true
+        type: choice
+        default: "new-tag"
+        options:
+          - new-tag  # Gate on CI -> bump version -> tag & push -> build & publish release
+          - tag      # Rebuild existing tag -> build & publish release
+          - commit   # Test build latest commit -> load the image only (no release)
+      ref:
+        description: "Custom tag or commit SHA (optional, defaults to latest)"
+        required: false
+        type: string
+  schedule:
+    - cron: '0 0 * * 0' # Weekly: Sunday 00:00 UTC (defaults to target: new-tag)
 
 # Serialise releases: two concurrent runs must never race for the same version.
 concurrency:
@@ -30,7 +52,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   # A literal, lowercase, with no expressions. `${{ github.repository }}`
@@ -42,27 +64,40 @@ env:
   IMAGE: ghcr.io/delnegend/l4d2-linux-server
 
 jobs:
-  version:
-    # Orchestration only, so the single-core runner is enough.
-    runs-on: ubuntu-slim
+  prepare:
+    name: Prepare / Bump Version
+    # Orchestration plus `just check`, so the full runner is enough.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
-      bump: ${{ steps.semver.outputs.bump }}
-      tag: ${{ steps.semver.outputs.next }}
-      version: ${{ steps.semver.outputs.nextStrict }}
-      current: ${{ steps.semver.outputs.current }}
-
+      ref: ${{ steps.resolve.outputs.ref }}
+      # semver-action calls the `v`-less version `nextStrict`; the key is
+      # spelled `version_strict` rather than a bare `version:` so that
+      # scripts/docs-check.py can keep telling a real `version:` input apart
+      # from an output (its scan is a plain text search for the line).
+      version_strict: ${{ steps.resolve.outputs.version_strict }}
+      publish: ${{ steps.resolve.outputs.publish }}
+      skip: ${{ steps.resolve.outputs.skip }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          token: ${{ github.token }}
+          persist_credentials: true
           fetch-depth: 0
-          fetch-tags: true
 
-      - name: Next version (Conventional Commits since the latest tag)
+      - name: Set up just
+        uses: extractions/setup-just@v4
+
+      # ---------------------------------------------------------------------
+      # Mode 1: new-tag (semver -> CI gate -> bump -> atomic push)
+      # ---------------------------------------------------------------------
+      - name: Calculate Next SemVer
+        if: (inputs.target || 'new-tag') == 'new-tag'
         id: semver
         uses: ietf-tools/semver-action@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
           # The oldest tag that exists, used only if every other tag is ever
           # deleted. Must name a real tag or the action errors.
           fallbackTag: v1.0.0
@@ -74,24 +109,92 @@ jobs:
           noNewCommitBehavior: silent
           noVersionBumpBehavior: silent
 
-      - name: Report
+      - name: CI Gate (verify code is green before bumping)
+        if: (inputs.target || 'new-tag') == 'new-tag' && steps.semver.outputs.bump != 'none'
+        run: just check
+
+      - name: Bump package manager version
+        if: (inputs.target || 'new-tag') == 'new-tag' && steps.semver.outputs.bump != 'none'
+        env:
+          NEXT_STRICT: ${{ steps.semver.outputs.nextStrict }}
+        run: just bump "$NEXT_STRICT"
+
+      # The version is not written anywhere in the tree: it is injected into
+      # the image as the SERVER_VERSION build argument, so `just bump` is a
+      # documented no-op and this commits only when something staged.
+      - name: Commit the bump (skipped when the project has no manifest)
+        if: (inputs.target || 'new-tag') == 'new-tag' && steps.semver.outputs.bump != 'none'
+        env:
+          NEXT_TAG: ${{ steps.semver.outputs.next }}
         run: |
-          echo "current: ${{ steps.semver.outputs.current || 'none' }}"
-          echo "bump:    ${{ steps.semver.outputs.bump }}"
-          echo "next:    ${{ steps.semver.outputs.next || 'none' }}"
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "actions@users.noreply.github.com"
+
+          git add -u
+          if git diff --staged --quiet; then
+            echo "no manifest to bump — tagging HEAD"
+          else
+            git commit -m "chore(release): ${NEXT_TAG}"
+          fi
+
+          git rev-parse -q --verify "refs/tags/${NEXT_TAG}" >/dev/null && { echo "::error::tag ${NEXT_TAG} already exists"; exit 1; }
+          git tag -a "${NEXT_TAG}" -m "Release ${NEXT_TAG}"
+
+          git push origin HEAD:main "refs/tags/${NEXT_TAG}"
+
+      # ---------------------------------------------------------------------
+      # Resolve outputs for the build job
+      # ---------------------------------------------------------------------
+      - name: Resolve outputs
+        id: resolve
+        env:
+          TARGET: ${{ inputs.target || 'new-tag' }}
+          INPUT_REF: ${{ inputs.ref }}
+          BUMP: ${{ steps.semver.outputs.bump }}
+          CURRENT: ${{ steps.semver.outputs.current }}
+          NEXT: ${{ steps.semver.outputs.next }}
+          NEXT_STRICT: ${{ steps.semver.outputs.nextStrict }}
+        run: |
+          set -euo pipefail
+          if [ "$TARGET" = "new-tag" ]; then
+            if [ "$BUMP" = "none" ]; then
+              echo "No version bump needed (current: ${CURRENT:-none})."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            {
+              echo "ref=$NEXT"
+              echo "version_strict=$NEXT_STRICT"
+              echo "publish=true"
+              echo "skip=false"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$TARGET" = "tag" ]; then
+            TAG="${INPUT_REF:-$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)}"
+            [ -n "$TAG" ] || { echo "::error::No release tag found"; exit 1; }
+            { echo "ref=$TAG"; echo "version_strict=${TAG#v}"; echo "publish=true"; echo "skip=false"; } >> "$GITHUB_OUTPUT"
+          else
+            SHA="${INPUT_REF:-$(git rev-parse HEAD)}"
+            { echo "ref=$SHA"; echo "version_strict=$SHA"; echo "publish=false"; echo "skip=false"; } >> "$GITHUB_OUTPUT"
+            echo "Running test build against commit $SHA (will not publish release)"
+          fi
 
   build:
-    needs: version
-    if: needs.version.outputs.bump != 'none'
+    name: Build & Release Artifacts
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     # A container image build, so it needs the full runner's toolchain.
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # to create the release and its tag
+      contents: write   # to create the release
       packages: write   # to push to ghcr.io
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -108,37 +211,44 @@ jobs:
       # so `:1.0.3` always means the same thing and there is nothing ambiguous
       # to accidentally deploy.
       #
+      # `target: commit` is a test build: nothing is pushed, the image is only
+      # loaded into the runner's local store, and the GitHub Release is not
+      # published.
+      #
       # The registry blobs are zstd level 4. Anything that pulls this image
       # needs a runtime that understands zstd layers (containerd 1.7+,
-      # Docker 20.10+, podman 3+); if that ever stops being true, change
-      # `outputs` to `type=image,compression=gzip`.
+      # Docker 20.10+, podman 3+); if that ever stops being true, change the
+      # `outputs` line to `type=image,compression=gzip`.
       - name: Build and push server
         uses: docker/build-push-action@v7
         with:
           context: .
           target: server
           platforms: linux/amd64
-          push: true
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          load: ${{ needs.prepare.outputs.publish != 'true' }}
           build-args: |
-            SERVER_VERSION=${{ needs.version.outputs.version }}
-          outputs: type=image,compression=zstd,compression-level=4
+            SERVER_VERSION=${{ needs.prepare.outputs.version_strict }}
+          outputs: ${{ needs.prepare.outputs.publish == 'true' && 'type=image,compression=zstd,compression-level=4' || '' }}
           tags: |
-            ${{ env.IMAGE }}:${{ needs.version.outputs.version }}
+            ${{ env.IMAGE }}:${{ needs.prepare.outputs.version_strict }}
             ${{ env.IMAGE }}:latest
           labels: |
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version_strict }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max,image-manifest=true
 
-      # Runs last so it only happens once the image exists. Creating the
-      # release also creates the tag, which is what the next week's version
-      # calculation compares against. If this step fails, no tag exists, so the
-      # next run recomputes the same version and retries.
+      # The tag already exists by the time this runs: `prepare` created and
+      # pushed it before the build started. That is the point - the release
+      # names a version that is already a fact about the repository - but it
+      # also means a build failure here leaves a tag with no release. The
+      # repair is to re-run with `target: tag`, which rebuilds the tag and
+      # publishes its release without touching the version.
       - name: Publish the release
+        if: needs.prepare.outputs.publish == 'true'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          name: ${{ needs.version.outputs.tag }}
+          tag_name: ${{ needs.prepare.outputs.ref }}
           generate_release_notes: true

@@ -212,3 +212,7 @@ check:
 # Everything CI does, before pushing.
 verify: check smoke
     @echo "check + smoke (linking, A2S self-check, plugin stack) all passed"
+
+# No manifest: versions live in git tags, so this is a documented no-op.
+bump version:
+    @echo "versions are tracked by git tags; nothing to bump"

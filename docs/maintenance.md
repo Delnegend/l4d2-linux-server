@@ -68,7 +68,8 @@ as a status board.
 Run it by hand from **Actions → Upstream updates → Run workflow**.
 
 Merging a bump does **not** publish. It lands on `main`, and releasing is a
-separate button press — see [When it runs](#when-it-runs).
+separate run — the Sunday cron or a button press — see
+[When it runs](#when-it-runs).
 
 ## Updating MetaMod and SourceMod
 
@@ -144,23 +145,41 @@ about them.
 
 ### When it runs
 
-**Actions → Release → Run workflow.** By hand, and only by hand. There is no
-schedule: shipping a new image to everyone who pulls `:latest` is a deliberate
-act, not something that should happen because it was Sunday.
+**Actions → Release → Run workflow**, or the weekly schedule. The workflow
+runs unattended every Sunday at 00:00 UTC and is also dispatched by hand; both
+roads lead to the same three targets:
 
-The run takes no inputs. If it decides there is nothing worth releasing, the
-build job is skipped and the run ends green having published nothing.
+| `target` | What the run does |
+|---|---|
+| `new-tag` (the default, and what the cron uses) | gate on `just check`, derive the next version, tag and push it, then build and publish the release |
+| `tag` | rebuild an existing tag and publish its release |
+| `commit` | test-build a commit and load the image into the runner only — never a release |
 
-So the decision is two separate ones, and only one of them is automatic:
+The `ref` input is optional and read only by `tag` (the tag to rebuild,
+defaulting to the newest) and `commit` (a SHA, defaulting to `HEAD`); `new-tag`
+derives its own reference and ignores it. If a `new-tag` run decides there is
+nothing worth releasing, the build job is skipped and the run ends green having
+published nothing.
+
+So the decision is two separate ones:
 
 | | Decided by | You can override? |
 |---|---|---|
 | **What version** | the commit messages | no — nothing in the workflow accepts a number |
-| **Whether to ship** | you, by pressing the button | that is the button |
+| **Whether to ship** | the Sunday cron, or you pressing the button | yes — dispatch `target: commit` for a test build, or `target: tag` to republish a ref |
 
-If you dispatch it and it publishes nothing, the commits since the last tag did
-not earn a bump. Fix that in the commit message — `git commit --amend` to
-`fix:` rather than `chore:` — rather than looking for a number to type.
+If a run publishes nothing, the commits since the last tag did not earn a bump.
+Fix that in the commit message — `git commit --amend` to `fix:` rather than
+`chore:` — rather than looking for a number to type. A week whose commits are
+all `docs:`, `ci:` or `chore:` releases nothing, and the run is configured to
+end green and silent rather than fail on it — that is what maintenance mode
+means here: a Sunday with no bump-worthy commit ships no image.
+
+Because the `prepare` job creates and pushes the tag *before* the build starts,
+the release names a version that is already a fact about the repository. The
+consequence is that a failed build leaves a tag with no release; the repair is
+to re-run with `target: tag`, which rebuilds that tag and publishes its release
+without touching the version.
 
 ### The tags themselves
 
